@@ -44,7 +44,7 @@ Garmin Connect uses an aggressive DEM-based elevation correction system that:
 ### For Accurate Elevation Training Data:
 1. **Wahoo Fitness Platform** ✅ - **CONFIRMED: Preserves elevation data in indoor training simulator**
 2. **GoldenCheetah** (Open Source) - Desktop cycling analysis platform with extensive GPX/TCX/FIT support
-3. **Import to Strava or TrainingPeaks** - these platforms often preserve imported elevation
+3. **Auuki** (Open Source) - Indoor training simulator that preserves elevation data from GPX/TCX/FIT files
 4. **Use Garmin BaseCamp** - desktop software may respect elevation data
 5. **Keep reference data** - use elevation_analysis.py for real ascent/descent values
 
@@ -53,10 +53,8 @@ Garmin Connect uses an aggressive DEM-based elevation correction system that:
 - **GoldenCheetah** - Comprehensive cycling analysis platform (supports GPX, TCX, FIT imports)
   - **Note**: Requires compilation for Apple Silicon or use with Rosetta
   - **Focus**: Analysis and training data management, not interactive training simulation
-- **MyWhoosh** - Free virtual cycling platform (may preserve elevation)
-- **Xert** - Freemium smart training platform
-- **Kinomap** - Interactive training app with video routes
-- **Various indoor cycling platforms** - ROUVY, FulGaz, BKOOL (worth testing)
+- **Auuki** - Open source indoor training simulator that preserves elevation data from GPX/TCX/FIT files
+- **Various commercial platforms** - ROUVY, FulGaz, BKOOL (testing required for elevation preservation)
 
 ### Additional Open Source Findings
 
@@ -72,16 +70,16 @@ After extensive searching of GitHub repositories, AlternativeTo, and cycling for
 
 1. **True Open Source Simulators**: Limited but improving - **Auuki** appears to be a viable option
 2. **Available Options**: Mix of commercial platforms (Zwift, TrainerRoad, ROUVY, FulGaz) and emerging open source solutions
-3. **Free Alternatives**: MyWhoosh (proprietary but free), Wahoo app integration, and now Auuki (open source)
+3. **Free Alternatives**: Auuki (open source, supports GPX/TCX/FIT files) and Wahoo app integration
 4. **Development Challenge**: Complex requirements (3D graphics, trainer protocols, real-time simulation) make open source development difficult
 
 ### Best Free/Open Source Recommendations
 
-1. **For Indoor Training**: **[Auuki](https://auuki.com)** (open source simulator that preserves elevation data) ✅ **NEW DISCOVERY**
+1. **For Indoor Training**: **[Auuki](https://auuki.com)** (open source simulator that preserves elevation data from GPX/TCX/FIT files) ✅ **NEW DISCOVERY**
 2. **For Route Analysis**: GoldenCheetah (open source, comprehensive)
-3. **For Free Training**: MyWhoosh (free, full-featured) or Wahoo Fitness app
+3. **For Commercial Training**: Wahoo Fitness app (confirmed to preserve elevation)
 4. **For Route Planning**: Use gpxscaler.py + clean TCX files with compatible platforms
-5. **For Elevation Preservation**: Avoid Garmin Connect, use Auuki/Strava/TrainingPeaks/RideWithGPS
+5. **For Elevation Preservation**: Avoid Garmin Connect, test with other platforms as needed
 
 ### For Garmin Connect Users:
 1. **Accept auto-correction** - use routes for navigation, ignore elevation
@@ -109,9 +107,9 @@ After extensive searching of GitHub repositories, AlternativeTo, and cycling for
 - Consider Garmin devices reliable for navigation, not elevation training
 
 ### If seeking accurate elevation:
-- Use Strava, TrainingPeaks, or RideWithGPS for imports
-- These platforms often preserve imported elevation data
-- Export to Garmin devices from these platforms if needed
+- Use Auuki (open source, supports GPX/TCX/FIT files) or Wahoo Fitness Platform (confirmed to preserve elevation)
+- Test other platforms as needed - elevation preservation varies by platform
+- Keep original files as reference for manual tracking if needed
 
 ## Conclusion
 

@@ -84,14 +84,11 @@ The scaled GPX files will be saved in a `scaled` subfolder (created automaticall
 GPXScaler generates routes that work well with various indoor training simulators. Here are some recommended platforms that preserve elevation data:
 
 ### Open Source Options
-- **[Auuki](https://auuki.com)** - Open source indoor training simulator that preserves imported elevation data from GPX/TCX files
+- **[Auuki](https://auuki.com)** - Open source indoor training simulator that preserves imported elevation data from GPX/TCX/FIT files
 - **[GoldenCheetah](https://goldencheetah.github.io)** - Open source cycling analysis platform with extensive GPX/TCX/FIT support
 
 ### Commercial Platforms (Known to Preserve Elevation)
 - **Wahoo Fitness Platform** - Confirmed to preserve elevation data in indoor training simulator
-- **MyWhoosh** - Free virtual cycling platform
-- **Strava** - Often preserves imported elevation data
-- **TrainingPeaks** - Professional training platform that respects imported elevation
 
 ### Note for Garmin Connect Users
 Garmin Connect often auto-corrects elevation data, potentially overriding your scaled routes. Consider using TCX format (`--tcx` flag) or alternative platforms for better elevation preservation.
