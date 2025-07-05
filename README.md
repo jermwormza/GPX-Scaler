@@ -67,16 +67,34 @@ python gpxscaler.py
 
 ## Output
 
-The scaled GPX files will be saved with a suffix indicating the scaling factor, for example:
+The scaled GPX files will be saved in a `scaled` subfolder (created automatically if it doesn't exist) with a suffix indicating the scaling factor, for example:
 
-- `stage-1-route.gpx` → `stage-1-route_scaled_075.gpx` (for 0.75x scaling)
+- `stage-1-route.gpx` → `scaled/stage-1-route_scaled_075.gpx` (for 0.75x scaling)
 
 ## Notes
 
-- Original GPX files are preserved; scaled versions are created as new files
+- Original GPX files are preserved; scaled versions are created as new files in the `scaled` subfolder
+- The `scaled` subfolder is created automatically in the same directory as the source GPX files
 - Elevation scaling applies proportionally to both ascent and descent
-- The tool maintains the relative shape and characteristics of the original routes
+- The tool maintains the relative shape and characteristics of the original routes using vector-based scaling
 - Location auto-detection requires an internet connection and may not work in all environments
+
+## Indoor Training Platforms
+
+GPXScaler generates routes that work well with various indoor training simulators. Here are some recommended platforms that preserve elevation data:
+
+### Open Source Options
+- **[Auuki](https://auuki.com)** - Open source indoor training simulator that preserves imported elevation data from GPX/TCX files
+- **[GoldenCheetah](https://goldencheetah.github.io)** - Open source cycling analysis platform with extensive GPX/TCX/FIT support
+
+### Commercial Platforms (Known to Preserve Elevation)
+- **Wahoo Fitness Platform** - Confirmed to preserve elevation data in indoor training simulator
+- **MyWhoosh** - Free virtual cycling platform
+- **Strava** - Often preserves imported elevation data
+- **TrainingPeaks** - Professional training platform that respects imported elevation
+
+### Note for Garmin Connect Users
+Garmin Connect often auto-corrects elevation data, potentially overriding your scaled routes. Consider using TCX format (`--tcx` flag) or alternative platforms for better elevation preservation.
 
 ## License
 
