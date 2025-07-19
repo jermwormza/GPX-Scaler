@@ -1,12 +1,12 @@
 {
-  "scale": 0.3,
+  "scale": 0.25,
   "start_lat": 52.5,
   "start_lon": 4.0,
-  "output_format": "fit",
-  "base_name": "TestFIT",
+  "output_format": "tcx",
+  "base_name": "Stage",
   "add_timing": true,
   "power": 160.0,
-  "weight": 110.0,
+  "weight": 75.0,
   "min_distance": 30,
   "max_ascent": 450.0
 }

@@ -147,7 +147,7 @@ class GPXScaler:
         bearing = math.atan2(x, y)
         return bearing
 
-    def calculate_cycling_speed(self, power_watts, weight_kg, elevation_change_m, distance_m, grade_factor=0.05):
+    def calculate_cycling_speed(self, power_watts, weight_kg, elevation_change_m, distance_m, grade_factor=0.04):
         """
         Calculate cycling speed based on power, weight, and terrain.
 
@@ -156,19 +156,39 @@ class GPXScaler:
             weight_kg: Total weight (rider + bike) in kg
             elevation_change_m: Elevation change over the segment in meters
             distance_m: Distance of the segment in meters
-            grade_factor: Factor for how much grade affects speed (0.05 = 5% speed reduction per 1% grade)
+            grade_factor: Factor for how much grade affects speed (0.04 = 4% speed reduction per 1% grade)
 
         Returns:
             Speed in m/s
         """
-        # Basic power-to-speed calculation (simplified physics model)
-        # Base speed from power (assumes flat terrain, no wind resistance)
-        # This is a simplified model - real cycling physics are much more complex
+        # More realistic power-to-speed calculation
+        # Based on typical cycling performance: 160W at 75kg should give ~25-28 km/h flat
 
-        # Base speed calculation: P = F * v, where F is roughly proportional to weight and v^2
-        # Simplified: v = (P / (weight_factor * weight))^(1/3)
-        weight_factor = 0.1  # Adjust this factor based on typical cycling conditions
-        base_speed_ms = (power_watts / (weight_factor * weight_kg)) ** (1/3)
+        # Base speed calculation using realistic power-to-speed relationship
+        power_to_weight = power_watts / weight_kg
+
+        # Realistic speed factors based on cycling performance data
+        # These factors are calibrated to match real-world cycling speeds
+        if power_to_weight > 4.0:
+            # Elite power: ~32-38 km/h
+            speed_factor = 8.5
+        elif power_to_weight > 3.0:
+            # High power: ~27-32 km/h
+            speed_factor = 9.5
+        elif power_to_weight > 2.2:
+            # Medium-high power: ~24-28 km/h
+            speed_factor = 11.5
+        elif power_to_weight > 1.6:
+            # Medium power: ~20-25 km/h
+            speed_factor = 13.5
+        elif power_to_weight > 1.2:
+            # Lower-medium power: ~18-22 km/h
+            speed_factor = 16.0
+        else:
+            # Lower power: ~15-19 km/h
+            speed_factor = 15.0        # Base speed in km/h, then convert to m/s
+        base_speed_kmh = power_to_weight * speed_factor
+        base_speed_ms = base_speed_kmh / 3.6
 
         # Adjust for gradient
         if distance_m > 0:
@@ -176,13 +196,13 @@ class GPXScaler:
             # Reduce speed on uphills, increase on downhills
             speed_adjustment = 1 - (gradient_percent * grade_factor)
             # Limit speed adjustment to reasonable bounds
-            speed_adjustment = max(0.2, min(2.0, speed_adjustment))
+            speed_adjustment = max(0.3, min(1.8, speed_adjustment))
             adjusted_speed = base_speed_ms * speed_adjustment
         else:
             adjusted_speed = base_speed_ms
 
-        # Ensure minimum realistic cycling speed (1 m/s = 3.6 km/h)
-        return max(1.0, adjusted_speed)
+        # Ensure minimum realistic cycling speed (3 m/s = 11 km/h)
+        return max(3.0, adjusted_speed)
 
     def calculate_total_ride_duration(self, gpx, power_watts, weight_kg):
         """
@@ -252,6 +272,111 @@ class GPXScaler:
                 total_seconds += time_seconds
 
         return total_seconds
+
+    def add_timing_data_based_on_original(self, scaled_gpx, original_gpx, power_watts, weight_kg, start_time=None):
+        """
+        Add timing data to scaled GPX based on original route distances/elevations.
+        This ensures timing reflects the original route difficulty, not the scaled version.
+
+        Args:
+            scaled_gpx: GPXpy object (already scaled coordinates)
+            original_gpx: GPXpy object (original unscaled route for timing calculation)
+            power_watts: Average power output in watts
+            weight_kg: Total weight (rider + bike) in kg
+            start_time: Starting datetime (default: calculated from current time)
+        """
+        if start_time is None:
+            # Calculate total ride duration based on ORIGINAL route
+            total_duration_seconds = self.calculate_total_ride_duration(original_gpx, power_watts, weight_kg)
+
+            # Use current date and time, then subtract ride duration to get start time
+            now = datetime.now()
+            # Add 10 minutes buffer to ensure we finish before current time
+            start_time = now - timedelta(seconds=total_duration_seconds + 600)
+
+            print(f"Calculated ride duration (original route): {total_duration_seconds/3600:.1f} hours")
+            print(f"Start time: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"End time: {(start_time + timedelta(seconds=total_duration_seconds)).strftime('%Y-%m-%d %H:%M:%S')}")
+
+        current_time = start_time
+
+        # Convert routes to tracks when adding timing data
+        if scaled_gpx.routes:
+            for route in scaled_gpx.routes:
+                if route.points:
+                    # Create a new track from the route
+                    track = gpxpy.gpx.GPXTrack()
+                    track.name = route.name or "Converted Route"
+                    segment = gpxpy.gpx.GPXTrackSegment()
+
+                    # Copy route points to track points
+                    for route_point in route.points:
+                        track_point = gpxpy.gpx.GPXTrackPoint(
+                            latitude=route_point.latitude,
+                            longitude=route_point.longitude,
+                            elevation=route_point.elevation
+                        )
+                        segment.points.append(track_point)
+
+                    track.segments.append(segment)
+                    scaled_gpx.tracks.append(track)
+
+            # Clear routes since we've converted them to tracks
+            scaled_gpx.routes = []
+
+        # Get original route data for timing calculation
+        original_segments = []
+        for track in original_gpx.tracks:
+            for segment in track.segments:
+                if segment.points:
+                    original_segments.append(segment.points)
+
+        for route in original_gpx.routes:
+            if route.points:
+                original_segments.append(route.points)
+
+        # Process scaled tracks with timing based on original route
+        scaled_segment_index = 0
+        for track in scaled_gpx.tracks:
+            for segment in track.segments:
+                if len(segment.points) < 2:
+                    continue
+
+                # Set time for first point
+                segment.points[0].time = current_time
+
+                # Get corresponding original segment if available
+                if scaled_segment_index < len(original_segments):
+                    original_points = original_segments[scaled_segment_index]
+
+                    # Calculate times for subsequent points using ORIGINAL distances/elevations
+                    for i in range(1, min(len(segment.points), len(original_points))):
+                        if i < len(original_points):
+                            # Use original route data for timing calculation
+                            original_prev = original_points[i-1]
+                            original_curr = original_points[i]
+
+                            # Calculate distance and elevation change from ORIGINAL route
+                            distance_m = self.calculate_distance(original_prev, original_curr)
+
+                            elevation_change = 0
+                            if (original_prev.elevation is not None and
+                                original_curr.elevation is not None):
+                                elevation_change = original_curr.elevation - original_prev.elevation
+
+                            # Calculate speed and time for this segment using original data
+                            speed_ms = self.calculate_cycling_speed(
+                                power_watts, weight_kg, elevation_change, distance_m
+                            )
+
+                            # Calculate time for this segment
+                            time_seconds = distance_m / speed_ms
+                            current_time += timedelta(seconds=time_seconds)
+
+                        # Set time for current point in scaled route
+                        segment.points[i].time = current_time
+
+                scaled_segment_index += 1
 
     def add_timing_data_to_gpx(self, gpx, power_watts, weight_kg, start_time=None):
         """
@@ -641,7 +766,7 @@ class GPXScaler:
             else:
                 new_base_elevation = original_base_elevation
 
-            # Scale tracks - properly scale the route path using vector-based scaling
+            # Note: Timing will be calculated AFTER scaling using scaled distances            # Scale tracks - properly scale the route path using vector-based scaling
             for track in gpx.tracks:
                 for segment in track.segments:
                     if len(segment.points) < 2:
@@ -740,9 +865,10 @@ class GPXScaler:
                         # If no elevation data, keep same as previous
                         route.points[i].elevation = prev_point.elevation
 
-            # Add timing data if requested
+            # Add timing data AFTER scaling (using scaled distances and elevations)
             if add_timing and power_watts is not None and weight_kg is not None:
-                print(f"Adding timing data based on {power_watts}W power and {weight_kg}kg weight...")
+                print(f"Adding timing data based on SCALED route distances "
+                      f"with {power_watts}W power and {weight_kg}kg weight...")
                 self.add_timing_data_to_gpx(gpx, power_watts, weight_kg)
 
             # Create output subfolder if it doesn't exist
