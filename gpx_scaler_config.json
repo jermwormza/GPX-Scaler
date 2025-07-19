@@ -1,12 +1,12 @@
 {
-  "scale": 0.2,
-  "start_lat": 52.5,
-  "start_lon": 4.0,
+  "scale": 0.25,
+  "start_lat": -36.0,
+  "start_lon": 23.0,
   "output_format": "tcx",
-  "base_name": "Test_No_Errors",
+  "base_name": "Tour de la Vache",
   "add_timing": true,
-  "power": 300.0,
-  "weight": 80.0,
-  "min_distance": null,
-  "max_ascent": null
+  "power": 160.0,
+  "weight": 110.0,
+  "min_distance": 30,
+  "max_ascent": 450.0
 }

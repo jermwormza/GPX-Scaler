@@ -1402,7 +1402,9 @@ def get_user_input():
 
         # Get minimum distance (optional)
         min_distance_km = None
-        min_dist_input = input("\nEnter minimum distance in km (or press Enter to skip): ").strip()
+        min_dist_default = f" (default: {config['min_distance']}km)" if config['min_distance'] else ""
+        min_dist_input = input(f"\nEnter minimum distance in km{min_dist_default} "
+                              f"(or press Enter to skip): ").strip()
         if min_dist_input:
             try:
                 min_distance_km = float(min_dist_input)
@@ -1412,10 +1414,14 @@ def get_user_input():
             except ValueError:
                 print("Invalid minimum distance, skipping minimum distance requirement.")
                 min_distance_km = None
+        elif config['min_distance']:
+            min_distance_km = config['min_distance']
 
         # Get maximum ascent (optional)
         max_ascent_m = None
-        max_ascent_input = input("\nEnter maximum ascent in meters (or press Enter to skip): ").strip()
+        max_ascent_default = f" (default: {config['max_ascent']}m)" if config['max_ascent'] else ""
+        max_ascent_input = input(f"\nEnter maximum ascent in meters{max_ascent_default} "
+                                f"(or press Enter to skip): ").strip()
         if max_ascent_input:
             try:
                 max_ascent_m = float(max_ascent_input)
@@ -1425,6 +1431,8 @@ def get_user_input():
             except ValueError:
                 print("Invalid maximum ascent, skipping maximum ascent requirement.")
                 max_ascent_m = None
+        elif config['max_ascent']:
+            max_ascent_m = config['max_ascent']
 
         # Show preview
         scaler.preview_scaling_results(scale_factor, min_distance_km, max_ascent_m)
@@ -1457,11 +1465,21 @@ def get_user_input():
     print("="*80)
 
     print("Choose output format:")
-    print("1. GPX (default)")
-    print("2. TCX (better for Garmin Connect)")
-    print("3. FIT (for Garmin devices)")
+    format_map = {'gpx': '1', 'tcx': '2', 'fit': '3'}
+    default_format_num = format_map.get(config['output_format'], '2')
+    format_default_text = {
+        '1': 'GPX', '2': 'TCX (better for Garmin Connect)', '3': 'FIT'
+    }[default_format_num]
 
-    format_choice = input("Choose format (1/2/3, default: 2): ").strip()
+    print(f"1. GPX")
+    print(f"2. TCX (better for Garmin Connect)")
+    print(f"3. FIT (for Garmin devices)")
+
+    format_choice = input(f"Choose format (1/2/3, default: {default_format_num} - "
+                         f"{format_default_text}): ").strip()
+    if not format_choice:
+        format_choice = default_format_num
+
     if format_choice == '1':
         output_format = 'gpx'
     elif format_choice == '3':
@@ -1480,8 +1498,11 @@ def get_user_input():
         print("\nEntering custom coordinates...")
         while True:
             try:
-                lat_input = input("Enter starting latitude: ").strip()
-                start_lat = float(lat_input)
+                lat_input = input(f"Enter starting latitude (default: {config['start_lat']}): ").strip()
+                if not lat_input:
+                    start_lat = config['start_lat']
+                else:
+                    start_lat = float(lat_input)
                 if not (-90 <= start_lat <= 90):
                     print("Latitude must be between -90 and 90.")
                     continue
@@ -1491,8 +1512,11 @@ def get_user_input():
 
         while True:
             try:
-                lon_input = input("Enter starting longitude: ").strip()
-                start_lon = float(lon_input)
+                lon_input = input(f"Enter starting longitude (default: {config['start_lon']}): ").strip()
+                if not lon_input:
+                    start_lon = config['start_lon']
+                else:
+                    start_lon = float(lon_input)
                 if not (-180 <= start_lon <= 180):
                     print("Longitude must be between -180 and 180.")
                     continue
@@ -1502,11 +1526,14 @@ def get_user_input():
 
     # Get base name for output files (optional)
     base_name = None
-    base_name_input = input("\nEnter base name for output files "
-                           "(e.g., 'Stage' for Stage 1, Stage 2, etc., "
-                           "or press Enter to use original filenames): ").strip()
+    default_base = config['base_name'] if config['base_name'] else "original filenames"
+    base_name_input = input(f"\nEnter base name for output files "
+                           f"(e.g., 'Stage' for Stage 1, Stage 2, etc., "
+                           f"or press Enter for {default_base}): ").strip()
     if base_name_input:
         base_name = base_name_input
+    elif config['base_name']:
+        base_name = config['base_name']
 
     # Ask about timing data
     add_timing = False
@@ -1517,10 +1544,16 @@ def get_user_input():
     print("TIMING DATA GENERATION")
     print("="*80)
     print("Generate estimated timing data based on power and weight?")
-    print("This will add timestamps to each GPS point based on calculated cycling speeds.")
+    print("This will add timestamps to each GPS point based on calculated "
+          "cycling speeds.")
     print("="*80)
 
-    timing_choice = input("Add timing data? (y/n, default: n): ").strip().lower()
+    default_timing = "y" if config['add_timing'] else "n"
+    timing_choice = input(f"Add timing data? (y/n, default: {default_timing}): "
+                         ).strip().lower()
+
+    if not timing_choice:
+        timing_choice = default_timing
 
     if timing_choice in ['y', 'yes']:
         add_timing = True
@@ -1528,8 +1561,12 @@ def get_user_input():
         # Get power input
         while True:
             try:
-                power_input = input("Enter average power output in watts (e.g., 200): ").strip()
-                power_watts = float(power_input)
+                power_input = input(f"Enter average power output in watts "
+                                   f"(default: {config['power']}): ").strip()
+                if not power_input:
+                    power_watts = config['power']
+                else:
+                    power_watts = float(power_input)
                 if power_watts <= 0:
                     print("Power must be positive.")
                     continue
@@ -1540,8 +1577,12 @@ def get_user_input():
         # Get weight input
         while True:
             try:
-                weight_input = input("Enter total weight (rider + bike) in kg (e.g., 75): ").strip()
-                weight_kg = float(weight_input)
+                weight_input = input(f"Enter total weight (rider + bike) in kg "
+                                    f"(default: {config['weight']}): ").strip()
+                if not weight_input:
+                    weight_kg = config['weight']
+                else:
+                    weight_kg = float(weight_input)
                 if weight_kg <= 0:
                     print("Weight must be positive.")
                     continue
@@ -1549,10 +1590,25 @@ def get_user_input():
             except ValueError:
                 print("Please enter a valid weight in kg.")
 
-        print(f"\nTiming data will be generated based on:")
+        print("\nTiming data will be generated based on:")
         print(f"  - Average power: {power_watts}W")
         print(f"  - Total weight: {weight_kg}kg")
-        print(f"  - Terrain-adjusted speeds calculated per segment")
+        print("  - Terrain-adjusted speeds calculated per segment")
+
+    # Save the updated configuration
+    updated_config = {
+        "scale": scale_factor,
+        "start_lat": start_lat,
+        "start_lon": start_lon,
+        "output_format": output_format,
+        "base_name": base_name or "",
+        "add_timing": add_timing,
+        "power": power_watts or config['power'],
+        "weight": weight_kg or config['weight'],
+        "min_distance": min_distance_km,
+        "max_ascent": max_ascent_m
+    }
+    scaler.save_config(updated_config)
 
     return (scaler, scale_factor, start_lat, start_lon, min_distance_km,
             max_ascent_m, output_folder, output_format, base_name,
@@ -1611,6 +1667,10 @@ def main():
 
     args = parser.parse_args()
 
+    # Check if any arguments were explicitly provided (not just defaults)
+    provided_args = sys.argv[1:]  # All command line arguments except script name
+    has_explicit_args = len(provided_args) > 0
+
     # Check if timing arguments are provided correctly
     if args.add_timing and (args.power is None or args.weight is None):
         print("Error: --add-timing requires both --power and --weight arguments")
@@ -1651,8 +1711,9 @@ def main():
             print(f"Error: Invalid terrain option {terrain_choice}. Use --list-terrain to see options.")
             sys.exit(1)
 
-    # Check if all required arguments are provided (including ocean coordinates)
-    if args.scale and (start_lat_arg is not None and start_lon_arg is not None):
+    # Check if all required arguments are explicitly provided via command line
+    # (not just config defaults) - only go to command line mode if user provided args
+    if has_explicit_args and args.scale and (start_lat_arg is not None and start_lon_arg is not None):
         # Command line mode
         if not scaler.find_gpx_files(args.folder):
             sys.exit(1)
