@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <!-- File Upload Section -->
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-upload me-2"></i>Upload GPX Files</h5>
+            </div>
+            <div class="card-body">
+                <div id="dropZone" class="drop-zone mb-3">
+                    <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
+                    <p>Drag & drop GPX files here<br>or click to browse</p>
+                    <input type="file" id="fileInput" multiple accept=".gpx" style="display: none;">
+                </div>
+
+                <!-- Upload Progress Section -->
+                <div id="uploadProgress" class="upload-progress mb-3" style="display: none;">
+                    <h6><i class="fas fa-upload me-2"></i>Uploading Files...</h6>
+                    <div id="uploadProgressItems"></div>
+                </div>
+
+                <div id="uploadedFiles" class="uploaded-files">
+                    <!-- Uploaded files will appear here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls Section -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5><i class="fas fa-sliders-h me-2"></i>Scaling Controls</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="distanceScale" class="form-label">
+                        Distance Scale: <span id="distanceScaleValue">1.000</span>x
+                    </label>
+                    <input type="range" class="form-range" id="distanceScale"
+                           min="0.100" max="2.000" step="0.005" value="1.000">
+                </div>
+
+                <div class="mb-3">
+                    <label for="ascentScale" class="form-label">
+                        Ascent Scale: <span id="ascentScaleValue">1.000</span>x
+                    </label>
+                    <input type="range" class="form-range" id="ascentScale"
+                           min="0.100" max="2.000" step="0.005" value="1.000">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Starting Location</label>
+                    <div class="row">
+                        <div class="col-6">
+                            <input type="number" class="form-control" id="startLat"
+                                   placeholder="Latitude" value="52.5" step="0.000001">
+                        </div>
+                        <div class="col-6">
+                            <input type="number" class="form-control" id="startLon"
+                                   placeholder="Longitude" value="4.0" step="0.000001">
+                        </div>
+                    </div>
+                    <small class="form-text text-muted">Default: Netherlands Coast (flat terrain)</small>
+                </div>
+
+                <div class="mb-3">
+                    <label for="baseName" class="form-label">Output Filename Prefix</label>
+                    <input type="text" class="form-control" id="baseName"
+                           placeholder="e.g., TDF2025" value="">
+                    <small class="form-text text-muted">Will prefix all output filenames (optional)</small>
+                </div>
+
+                <div class="mb-3">
+                    <label for="outputFormat" class="form-label">Output Format</label>
+                    <select class="form-select" id="outputFormat">
+                        <option value="gpx">GPX</option>
+                        <option value="tcx">TCX</option>
+                        <option value="fit">FIT</option>
+                    </select>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="addTiming">
+                    <label class="form-check-label" for="addTiming">
+                        Add Timing Data
+                    </label>
+                </div>
+
+                <div id="timingControls" class="timing-controls" style="display: none;">
+                    <div class="row">
+                        <div class="col-6">
+                            <label for="powerWatts" class="form-label">Power (W)</label>
+                            <input type="number" class="form-control" id="powerWatts"
+                                   value="200" min="50" max="500">
+                        </div>
+                        <div class="col-6">
+                            <label for="weightKg" class="form-label">Weight (kg)</label>
+                            <input type="number" class="form-control" id="weightKg"
+                                   value="75" min="40" max="150">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Section -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-map me-2"></i>Route Preview</h5>
+            </div>
+            <div class="card-body">
+                <!-- Side-by-side route canvases -->
+                <div class="row">
+                    <div class="col-6">
+                        <h6 class="text-center text-muted mb-2">Original Route</h6>
+                        <div id="originalRouteCanvas" class="route-canvas-small">
+                            <p class="text-muted text-center">Upload GPX files to see route preview</p>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <h6 class="text-center text-muted mb-2">Scaled Route</h6>
+                        <div id="scaledRouteCanvas" class="route-canvas-small">
+                            <p class="text-muted text-center">Adjust sliders to see scaled route</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Elevation Profiles -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5><i class="fas fa-chart-line me-2"></i>Elevation Profiles</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <h6 class="text-muted mb-2">Original Elevation</h6>
+                    <div class="chart-container">
+                        <canvas id="originalElevationChart"></canvas>
+                    </div>
+                </div>
+                <div>
+                    <h6 class="text-muted mb-2">Scaled Elevation</h6>
+                    <div class="chart-container">
+                        <canvas id="scaledElevationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics and Processing Section -->
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-chart-bar me-2"></i>Statistics</h5>
+            </div>
+            <div class="card-body">
+                <div id="statisticsDisplay">
+                    <p class="text-muted">Upload files to see statistics</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5><i class="fas fa-cogs me-2"></i>Processing</h5>
+            </div>
+            <div class="card-body">
+                <button id="processAllBtn" class="btn btn-success w-100 mb-3" disabled>
+                    <i class="fas fa-play me-2"></i>Process All Files
+                </button>
+
+                <div id="processingProgress" style="display: none;">
+                    <div class="mb-3">
+                        <h6>Overall Progress</h6>
+                        <div class="progress mb-2">
+                            <div id="overallProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <small id="overallProgressText" class="text-muted">Preparing...</small>
+                    </div>
+
+                    <div id="fileProgressContainer">
+                        <h6>File Progress</h6>
+                        <div id="fileProgressList">
+                            <!-- Individual file progress bars will appear here -->
+                        </div>
+                    </div>
+                </div>
+
+                <div id="processedFiles" class="processed-files">
+                    <!-- Processed files will appear here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loadingModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2 mb-0">Processing...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Error Alert -->
+<div id="errorAlert" class="alert alert-danger alert-dismissible fade" role="alert" style="position: fixed; top: 80px; right: 20px; z-index: 1050; display: none;">
+    <span id="errorMessage"></span>
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+
+<!-- Success Alert -->
+<div id="successAlert" class="alert alert-success alert-dismissible fade" role="alert" style="position: fixed; top: 80px; right: 20px; z-index: 1050; display: none;">
+    <span id="successMessage"></span>
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endblock %}

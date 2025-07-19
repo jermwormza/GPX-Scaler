@@ -710,7 +710,8 @@ class GPXScaler:
                        min_distance_km=None, max_ascent_m=None,
                        starting_elevation=None, output_folder=None,
                        output_format='gpx', base_name=None,
-                       add_timing=False, power_watts=None, weight_kg=None):
+                       add_timing=False, power_watts=None, weight_kg=None,
+                       original_filename=None):
         """Scale a GPX file and save the result."""
         try:
             with open(gpx_file, 'r') as f:
@@ -883,17 +884,28 @@ class GPXScaler:
 
             # Determine base filename using base_name if provided
             if base_name:
-                # Extract stage number from filename
-                stage_number = self.extract_stage_number(gpx_file.name)
+                # Use original filename if provided, otherwise use the file stem
+                if original_filename:
+                    # Remove extension from original filename if present
+                    original_file_stem = Path(original_filename).stem
+                else:
+                    original_file_stem = gpx_file.stem
+
+                # Prefix the original filename with the base_name
+                clean_base_name = base_name.replace(' ', '_')
+                base_filename = f"{clean_base_name}{original_file_stem}"
+
+                # Extract stage number from filename for display name
+                stage_number = self.extract_stage_number(original_filename or gpx_file.name)
                 if isinstance(stage_number, int):
-                    base_filename = (f"{base_name.replace(' ', '_')}_"
-                                     f"{stage_number}")
                     display_name = f"{base_name} {stage_number}"
                 else:
-                    base_filename = base_name.replace(' ', '_')
-                    display_name = base_name
+                    display_name = f"{base_name} {original_file_stem}"
             else:
-                base_filename = gpx_file.stem
+                if original_filename:
+                    base_filename = Path(original_filename).stem
+                else:
+                    base_filename = gpx_file.stem
                 display_name = None
 
             # Set track name in GPX data if base_name is provided
