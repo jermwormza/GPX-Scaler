@@ -11,7 +11,7 @@ import math
 import re
 import requests
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     import gpxpy
@@ -79,6 +79,101 @@ class GPXScaler:
 
         bearing = math.atan2(x, y)
         return bearing
+
+    def calculate_cycling_speed(self, power_watts, weight_kg, elevation_change_m, distance_m, grade_factor=0.05):
+        """
+        Calculate cycling speed based on power, weight, and terrain.
+
+        Args:
+            power_watts: Cyclist's average power output in watts
+            weight_kg: Total weight (rider + bike) in kg
+            elevation_change_m: Elevation change over the segment in meters
+            distance_m: Distance of the segment in meters
+            grade_factor: Factor for how much grade affects speed (0.05 = 5% speed reduction per 1% grade)
+
+        Returns:
+            Speed in m/s
+        """
+        # Basic power-to-speed calculation (simplified physics model)
+        # Base speed from power (assumes flat terrain, no wind resistance)
+        # This is a simplified model - real cycling physics are much more complex
+
+        # Base speed calculation: P = F * v, where F is roughly proportional to weight and v^2
+        # Simplified: v = (P / (weight_factor * weight))^(1/3)
+        weight_factor = 0.1  # Adjust this factor based on typical cycling conditions
+        base_speed_ms = (power_watts / (weight_factor * weight_kg)) ** (1/3)
+
+        # Adjust for gradient
+        if distance_m > 0:
+            gradient_percent = (elevation_change_m / distance_m) * 100
+            # Reduce speed on uphills, increase on downhills
+            speed_adjustment = 1 - (gradient_percent * grade_factor)
+            # Limit speed adjustment to reasonable bounds
+            speed_adjustment = max(0.2, min(2.0, speed_adjustment))
+            adjusted_speed = base_speed_ms * speed_adjustment
+        else:
+            adjusted_speed = base_speed_ms
+
+        # Ensure minimum realistic cycling speed (1 m/s = 3.6 km/h)
+        return max(1.0, adjusted_speed)
+
+    def add_timing_data_to_gpx(self, gpx, power_watts, weight_kg, start_time=None):
+        """
+        Add timing data to GPX based on power and weight calculations.
+
+        Args:
+            gpx: GPXpy object
+            power_watts: Average power output in watts
+            weight_kg: Total weight (rider + bike) in kg
+            start_time: Starting datetime (default: now)
+        """
+        if start_time is None:
+            start_time = datetime.now()
+
+        current_time = start_time
+
+        # Process tracks
+        for track in gpx.tracks:
+            for segment in track.segments:
+                if len(segment.points) < 2:
+                    continue
+
+                # Set time for first point
+                segment.points[0].time = current_time
+
+                # Calculate times for subsequent points
+                for i in range(1, len(segment.points)):
+                    prev_point = segment.points[i-1]
+                    curr_point = segment.points[i]
+
+                    # Calculate distance and elevation change
+                    distance_m = self.calculate_distance(prev_point, curr_point)
+
+                    elevation_change = 0
+                    if (prev_point.elevation is not None and
+                        curr_point.elevation is not None):
+                        elevation_change = curr_point.elevation - prev_point.elevation
+
+                    # Calculate speed and time for this segment
+                    speed_ms = self.calculate_cycling_speed(
+                        power_watts, weight_kg, elevation_change, distance_m
+                    )
+
+                    # Calculate time for this segment
+                    time_seconds = distance_m / speed_ms
+                    current_time += timedelta(seconds=time_seconds)
+
+                    # Set time for current point
+                    curr_point.time = current_time
+
+        # Process routes (similar logic)
+        for route in gpx.routes:
+            if len(route.points) < 2:
+                continue
+
+            # Routes don't typically have time data in standard GPX, but we can calculate it
+            # Convert route to track with timing if needed
+            pass
 
     def calculate_destination_point(self, lat, lon, bearing, distance):
         """Calculate destination point given start point, bearing and distance."""
@@ -327,7 +422,8 @@ class GPXScaler:
     def scale_gpx_file(self, gpx_file, scale_factor, start_lat, start_lon,
                        min_distance_km=None, max_ascent_m=None,
                        starting_elevation=None, output_folder=None,
-                       output_format='gpx', base_name=None):
+                       output_format='gpx', base_name=None,
+                       add_timing=False, power_watts=None, weight_kg=None):
         """Scale a GPX file and save the result."""
         try:
             with open(gpx_file, 'r') as f:
@@ -482,6 +578,11 @@ class GPXScaler:
                         # If no elevation data, keep same as previous
                         route.points[i].elevation = prev_point.elevation
 
+            # Add timing data if requested
+            if add_timing and power_watts is not None and weight_kg is not None:
+                print(f"Adding timing data based on {power_watts}W power and {weight_kg}kg weight...")
+                self.add_timing_data_to_gpx(gpx, power_watts, weight_kg)
+
             # Create output subfolder if it doesn't exist
             if output_folder is not None:
                 scaled_folder = output_folder
@@ -567,7 +668,8 @@ class GPXScaler:
     def scale_all_files(self, scale_factor, start_lat, start_lon,
                         min_distance_km=None, max_ascent_m=None,
                         output_folder=None, output_format='gpx',
-                        base_name=None):
+                        base_name=None, add_timing=False,
+                        power_watts=None, weight_kg=None):
         """Scale all GPX files."""
         print(f"\nScaling all files by factor {scale_factor}")
         if min_distance_km:
@@ -576,6 +678,9 @@ class GPXScaler:
             print(f"Maximum ascent requirement: {max_ascent_m} m")
         print(f"New starting coordinates: {start_lat:.6f}, {start_lon:.6f}")
         print(f"Output format: {output_format.upper()}")
+
+        if add_timing:
+            print(f"Adding timing data: {power_watts}W power, {weight_kg}kg weight")
 
         # Determine output folder and always include scale factor
         if output_folder is None:
@@ -648,7 +753,8 @@ class GPXScaler:
         for gpx_file in self.gpx_files:
             if self.scale_gpx_file(gpx_file, scale_factor, start_lat, start_lon,
                                    min_distance_km, max_ascent_m, starting_elevation,
-                                   scaled_folder, output_format, base_name):
+                                   scaled_folder, output_format, base_name,
+                                   add_timing, power_watts, weight_kg):
                 success_count += 1
 
         print(f"\nCompleted: {success_count}/{len(self.gpx_files)} files processed successfully.")
@@ -1119,7 +1225,55 @@ def get_user_input():
     if base_name_input:
         base_name = base_name_input
 
-    return scaler, scale_factor, start_lat, start_lon, min_distance_km, max_ascent_m, output_folder, output_format, base_name
+    # Ask about timing data
+    add_timing = False
+    power_watts = None
+    weight_kg = None
+
+    print("\n" + "="*80)
+    print("TIMING DATA GENERATION")
+    print("="*80)
+    print("Generate estimated timing data based on power and weight?")
+    print("This will add timestamps to each GPS point based on calculated cycling speeds.")
+    print("="*80)
+
+    timing_choice = input("Add timing data? (y/n, default: n): ").strip().lower()
+
+    if timing_choice in ['y', 'yes']:
+        add_timing = True
+
+        # Get power input
+        while True:
+            try:
+                power_input = input("Enter average power output in watts (e.g., 200): ").strip()
+                power_watts = float(power_input)
+                if power_watts <= 0:
+                    print("Power must be positive.")
+                    continue
+                break
+            except ValueError:
+                print("Please enter a valid power value in watts.")
+
+        # Get weight input
+        while True:
+            try:
+                weight_input = input("Enter total weight (rider + bike) in kg (e.g., 75): ").strip()
+                weight_kg = float(weight_input)
+                if weight_kg <= 0:
+                    print("Weight must be positive.")
+                    continue
+                break
+            except ValueError:
+                print("Please enter a valid weight in kg.")
+
+        print(f"\nTiming data will be generated based on:")
+        print(f"  - Average power: {power_watts}W")
+        print(f"  - Total weight: {weight_kg}kg")
+        print(f"  - Terrain-adjusted speeds calculated per segment")
+
+    return (scaler, scale_factor, start_lat, start_lon, min_distance_km,
+            max_ascent_m, output_folder, output_format, base_name,
+            add_timing, power_watts, weight_kg)
 
 
 def main():
@@ -1147,6 +1301,14 @@ def main():
                        help='Base name for output files and track names '
                             '(e.g., "Stage" for Stage 1, Stage 2, etc.)')
 
+    # Add timing-related arguments
+    parser.add_argument('--add-timing', action='store_true',
+                       help='Add timing data based on power and weight calculations')
+    parser.add_argument('--power', type=float,
+                       help='Average power output in watts (required with --add-timing)')
+    parser.add_argument('--weight', type=float,
+                       help='Total weight (rider + bike) in kg (required with --add-timing)')
+
     # Keep --ocean and --list-oceans for backwards compatibility
     parser.add_argument('--ocean', type=int, choices=[1, 2, 3, 4, 5, 6],
                        help='Alias for --terrain (backwards compatibility)')
@@ -1154,6 +1316,11 @@ def main():
                        help='Alias for --list-terrain (backwards compatibility)')
 
     args = parser.parse_args()
+
+    # Check if timing arguments are provided correctly
+    if args.add_timing and (args.power is None or args.weight is None):
+        print("Error: --add-timing requires both --power and --weight arguments")
+        sys.exit(1)
 
     # Handle --list-terrain and --list-oceans flags (backwards compatibility)
     if args.list_terrain or args.list_oceans:
@@ -1217,7 +1384,8 @@ def main():
 
         scaler.scale_all_files(args.scale, start_lat_arg, start_lon_arg,
                               args.min_distance, args.max_ascent, None,
-                              output_format, args.base_name)
+                              output_format, args.base_name,
+                              args.add_timing, args.power, args.weight)
         print("\nGPX scaling completed!")
         sys.exit(0)
 
@@ -1240,10 +1408,13 @@ def main():
             sys.exit(1)
 
         (scaler, scale_factor, start_lat, start_lon, min_distance_km,
-         max_ascent_m, output_folder, output_format, base_name) = result
+         max_ascent_m, output_folder, output_format, base_name,
+         add_timing, power_watts, weight_kg) = result
+
         scaler.scale_all_files(scale_factor, start_lat, start_lon,
                                min_distance_km, max_ascent_m,
-                               output_folder, output_format, base_name)
+                               output_folder, output_format, base_name,
+                               add_timing, power_watts, weight_kg)
 
         # Output equivalent command-line invocation
         print("\n" + "="*80)
@@ -1272,6 +1443,8 @@ def main():
             cmd += " --fit"
         elif output_format == 'tcx':
             cmd += " --tcx"
+        if add_timing:
+            cmd += f" --add-timing --power {power_watts} --weight {weight_kg}"
 
         print(f"  {cmd}")
         print("="*80)
