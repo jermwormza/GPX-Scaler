@@ -10,6 +10,8 @@ import glob
 import math
 import re
 import requests
+import subprocess
+import json
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -25,6 +27,71 @@ class GPXScaler:
     def __init__(self):
         self.gpx_files = []
         self.route_stats = {}
+        self.config_file = Path("gpx_scaler_config.json")
+
+    def load_config(self):
+        """Load configuration from JSON file."""
+        default_config = {
+            "scale": 0.5,
+            "start_lat": 52.5,
+            "start_lon": 4.0,
+            "output_format": "tcx",
+            "base_name": "",
+            "add_timing": False,
+            "power": 250,
+            "weight": 75,
+            "min_distance": None,
+            "max_ascent": None
+        }
+
+        if self.config_file.exists():
+            try:
+                with open(self.config_file, 'r') as f:
+                    config = json.load(f)
+                    # Merge with defaults to handle missing keys
+                    for key, value in default_config.items():
+                        if key not in config:
+                            config[key] = value
+                    return config
+            except Exception as e:
+                print(f"Warning: Could not load config file: {e}")
+                return default_config
+        else:
+            return default_config
+
+    def save_config(self, scale=None, start_lat=None, start_lon=None,
+                   output_format=None, base_name=None, add_timing=None,
+                   power=None, weight=None, min_distance=None, max_ascent=None):
+        """Save configuration to JSON file."""
+        config = self.load_config()
+
+        # Update only provided parameters
+        if scale is not None:
+            config["scale"] = scale
+        if start_lat is not None:
+            config["start_lat"] = start_lat
+        if start_lon is not None:
+            config["start_lon"] = start_lon
+        if output_format is not None:
+            config["output_format"] = output_format
+        if base_name is not None:
+            config["base_name"] = base_name
+        if add_timing is not None:
+            config["add_timing"] = add_timing
+        if power is not None:
+            config["power"] = power
+        if weight is not None:
+            config["weight"] = weight
+        if min_distance is not None:
+            config["min_distance"] = min_distance
+        if max_ascent is not None:
+            config["max_ascent"] = max_ascent
+
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Could not save config file: {e}")
 
     def extract_stage_number(self, filename):
         """Extract stage number from filename for proper numerical sorting."""
@@ -117,20 +184,124 @@ class GPXScaler:
         # Ensure minimum realistic cycling speed (1 m/s = 3.6 km/h)
         return max(1.0, adjusted_speed)
 
-    def add_timing_data_to_gpx(self, gpx, power_watts, weight_kg, start_time=None):
+    def calculate_total_ride_duration(self, gpx, power_watts, weight_kg):
         """
-        Add timing data to GPX based on power and weight calculations.
+        Calculate the total duration of a ride in seconds based on power/weight.
 
         Args:
             gpx: GPXpy object
             power_watts: Average power output in watts
             weight_kg: Total weight (rider + bike) in kg
-            start_time: Starting datetime (default: now)
+
+        Returns:
+            Total duration in seconds
+        """
+        total_seconds = 0
+
+        # Process tracks
+        for track in gpx.tracks:
+            for segment in track.segments:
+                if len(segment.points) < 2:
+                    continue
+
+                for i in range(1, len(segment.points)):
+                    prev_point = segment.points[i-1]
+                    curr_point = segment.points[i]
+
+                    # Calculate distance and elevation change
+                    distance_m = self.calculate_distance(prev_point, curr_point)
+
+                    elevation_change = 0
+                    if (prev_point.elevation is not None and
+                        curr_point.elevation is not None):
+                        elevation_change = curr_point.elevation - prev_point.elevation
+
+                    # Calculate speed and time for this segment
+                    speed_ms = self.calculate_cycling_speed(
+                        power_watts, weight_kg, elevation_change, distance_m
+                    )
+
+                    # Calculate time for this segment
+                    time_seconds = distance_m / speed_ms
+                    total_seconds += time_seconds
+
+        # Process routes (similar logic)
+        for route in gpx.routes:
+            if len(route.points) < 2:
+                continue
+
+            for i in range(1, len(route.points)):
+                prev_point = route.points[i-1]
+                curr_point = route.points[i]
+
+                # Calculate distance and elevation change
+                distance_m = self.calculate_distance(prev_point, curr_point)
+
+                elevation_change = 0
+                if (prev_point.elevation is not None and
+                    curr_point.elevation is not None):
+                    elevation_change = curr_point.elevation - prev_point.elevation
+
+                # Calculate speed and time for this segment
+                speed_ms = self.calculate_cycling_speed(
+                    power_watts, weight_kg, elevation_change, distance_m
+                )
+
+                # Calculate time for this segment
+                time_seconds = distance_m / speed_ms
+                total_seconds += time_seconds
+
+        return total_seconds
+
+    def add_timing_data_to_gpx(self, gpx, power_watts, weight_kg, start_time=None):
+        """
+        Add timing data to GPX based on power and weight calculations.
+        Also converts routes to tracks when timing data is added.
+
+        Args:
+            gpx: GPXpy object
+            power_watts: Average power output in watts
+            weight_kg: Total weight (rider + bike) in kg
+            start_time: Starting datetime (default: calculated from current time)
         """
         if start_time is None:
-            start_time = datetime.now()
+            # Calculate total ride duration first to set appropriate start time
+            total_duration_seconds = self.calculate_total_ride_duration(gpx, power_watts, weight_kg)
+
+            # Use current date and time, then subtract ride duration to get start time
+            now = datetime.now()
+            # Add 10 minutes buffer to ensure we finish before current time
+            start_time = now - timedelta(seconds=total_duration_seconds + 600)
+
+            print(f"Calculated ride duration: {total_duration_seconds/3600:.1f} hours")
+            print(f"Start time: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"End time: {(start_time + timedelta(seconds=total_duration_seconds)).strftime('%Y-%m-%d %H:%M:%S')}")
 
         current_time = start_time
+
+        # Convert routes to tracks when adding timing data
+        if gpx.routes:
+            for route in gpx.routes:
+                if route.points:
+                    # Create a new track from the route
+                    track = gpxpy.gpx.GPXTrack()
+                    track.name = route.name or "Converted Route"
+                    segment = gpxpy.gpx.GPXTrackSegment()
+
+                    # Copy route points to track points
+                    for route_point in route.points:
+                        track_point = gpxpy.gpx.GPXTrackPoint(
+                            latitude=route_point.latitude,
+                            longitude=route_point.longitude,
+                            elevation=route_point.elevation
+                        )
+                        segment.points.append(track_point)
+
+                    track.segments.append(segment)
+                    gpx.tracks.append(track)
+
+            # Clear routes since we've converted them to tracks
+            gpx.routes = []
 
         # Process tracks
         for track in gpx.tracks:
@@ -165,15 +336,6 @@ class GPXScaler:
 
                     # Set time for current point
                     curr_point.time = current_time
-
-        # Process routes (similar logic)
-        for route in gpx.routes:
-            if len(route.points) < 2:
-                continue
-
-            # Routes don't typically have time data in standard GPX, but we can calculate it
-            # Convert route to track with timing if needed
-            pass
 
     def calculate_destination_point(self, lat, lon, bearing, distance):
         """Calculate destination point given start point, bearing and distance."""
@@ -642,14 +804,13 @@ class GPXScaler:
                 with open(temp_gpx, 'w') as f:
                     f.write(gpx.to_xml())
 
-                # Convert to requested format
+                # Convert to requested format with timing information
                 if output_format == 'fit':
-                    success = self.convert_gpx_to_fit_format(temp_gpx, output_file)
+                    success = self.convert_gpx_to_fit_format(temp_gpx, output_file, add_timing)
                 else:  # tcx
-                    success = self.convert_gpx_to_tcx_format(temp_gpx, output_file)
+                    success = self.convert_gpx_to_tcx_format(temp_gpx, output_file, add_timing)
 
-                # Clean up temporary file
-                temp_gpx.unlink()
+                # Note: temp file cleanup is handled by conversion functions
 
                 if not success:
                     return False
@@ -759,6 +920,20 @@ class GPXScaler:
 
         print(f"\nCompleted: {success_count}/{len(self.gpx_files)} files processed successfully.")
 
+        # Save configuration for next time
+        self.save_config(
+            scale=scale_factor,
+            start_lat=start_lat,
+            start_lon=start_lon,
+            output_format=output_format,
+            base_name=base_name,
+            add_timing=add_timing,
+            power=power_watts,
+            weight=weight_kg,
+            min_distance=min_distance_km,
+            max_ascent=max_ascent_m
+        )
+
 
     def get_flat_terrain_coordinates(self):
         """Get predefined coordinates that are Garmin-compatible."""
@@ -863,7 +1038,100 @@ class GPXScaler:
                 print("Please enter a valid number.")
                 continue
 
-    def convert_gpx_to_fit_format(self, gpx_file_path, output_path):
+    def create_garmin_activity_tcx(self, gpx_file_path, output_path):
+        """Create a Garmin Connect compatible TCX file with Activity format."""
+        try:
+            # Read the GPX file
+            with open(gpx_file_path, 'r') as f:
+                gpx = gpxpy.parse(f)
+
+            # Start building TCX content
+            tcx_lines = []
+            tcx_lines.append('<?xml version="1.0" encoding="UTF-8"?>')
+            tcx_lines.append('<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">')
+            tcx_lines.append('  <Activities>')
+
+            # Create Activity ID (past date for compatibility)
+            activity_time = datetime(2024, 6, 1, 9, 0, 0)
+            activity_id = activity_time.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+
+            tcx_lines.append('    <Activity Sport="Biking">')
+            tcx_lines.append(f'      <Id>{activity_id}</Id>')
+
+            # Process tracks as laps
+            for track in gpx.tracks:
+                for segment in track.segments:
+                    if not segment.points:
+                        continue
+
+                    first_point = segment.points[0]
+                    last_point = segment.points[-1]
+
+                    # Calculate lap stats
+                    lap_start = first_point.time or activity_time
+                    lap_end = last_point.time or activity_time
+                    total_time = (lap_end - lap_start).total_seconds()
+
+                    # Calculate distance
+                    total_distance = 0
+                    for i in range(1, len(segment.points)):
+                        total_distance += self.calculate_distance(segment.points[i-1], segment.points[i])
+
+                    tcx_lines.append(f'      <Lap StartTime="{lap_start.strftime("%Y-%m-%dT%H:%M:%S.000Z")}">')
+                    tcx_lines.append(f'        <TotalTimeSeconds>{total_time:.1f}</TotalTimeSeconds>')
+                    tcx_lines.append(f'        <DistanceMeters>{total_distance:.2f}</DistanceMeters>')
+                    tcx_lines.append('        <Calories>300</Calories>')
+                    tcx_lines.append('        <Intensity>Active</Intensity>')
+                    tcx_lines.append('        <TriggerMethod>Manual</TriggerMethod>')
+                    tcx_lines.append('        <Track>')
+
+                    # Add trackpoints
+                    for point in segment.points:
+                        tcx_lines.append('          <Trackpoint>')
+
+                        if point.time:
+                            time_str = point.time.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+                        else:
+                            time_str = activity_id
+                        tcx_lines.append(f'            <Time>{time_str}</Time>')
+
+                        tcx_lines.append('            <Position>')
+                        tcx_lines.append(f'              <LatitudeDegrees>{point.latitude:.7f}</LatitudeDegrees>')
+                        tcx_lines.append(f'              <LongitudeDegrees>{point.longitude:.7f}</LongitudeDegrees>')
+                        tcx_lines.append('            </Position>')
+
+                        if point.elevation is not None:
+                            tcx_lines.append(f'            <AltitudeMeters>{point.elevation:.1f}</AltitudeMeters>')
+
+                        tcx_lines.append('          </Trackpoint>')
+
+                    tcx_lines.append('        </Track>')
+                    tcx_lines.append('      </Lap>')
+
+            tcx_lines.append('    </Activity>')
+            tcx_lines.append('  </Activities>')
+            tcx_lines.append('</TrainingCenterDatabase>')
+
+            # Write TCX file
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(tcx_lines))
+
+            print(f"✅ Activity-based TCX file created: {output_path}")
+
+            # Clean up temp file
+            try:
+                if os.path.exists(gpx_file_path):
+                    os.remove(gpx_file_path)
+            except Exception:
+                pass  # Silently ignore cleanup errors
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Error creating Activity TCX: {e}")
+            return False
+
+    def convert_gpx_to_fit_format(self, gpx_file_path, output_path, has_timing=False):
         """Convert GPX to FIT format using GPSBabel."""
         try:
             import subprocess
@@ -877,7 +1145,10 @@ class GPXScaler:
                       "brew install gpsbabel")
                 return False
 
-            print(f"Converting to FIT format: {gpx_file_path.name}")
+            if has_timing:
+                print(f"Converting to FIT activity format (with timing): {gpx_file_path.name}")
+            else:
+                print(f"Converting to FIT course format (route): {gpx_file_path.name}")
 
             # Convert to FIT format
             cmd = [
@@ -897,9 +1168,10 @@ class GPXScaler:
 
                     # Clean up temp file
                     try:
-                        os.remove(gpx_file_path)
-                    except:
-                        pass
+                        if os.path.exists(gpx_file_path):
+                            os.remove(gpx_file_path)
+                    except Exception:
+                        pass  # Silently ignore cleanup errors
 
                     return True
                 else:
@@ -913,7 +1185,7 @@ class GPXScaler:
             print(f"❌ Error during FIT conversion: {e}")
             return False
 
-    def convert_gpx_to_tcx_format(self, gpx_file_path, output_path):
+    def convert_gpx_to_tcx_format(self, gpx_file_path, output_path, has_timing=False):
         """Convert GPX to TCX format using GPSBabel."""
         try:
             import subprocess
@@ -927,9 +1199,14 @@ class GPXScaler:
                       "brew install gpsbabel")
                 return False
 
-            print(f"Converting to TCX format: {gpx_file_path.name}")
+            if has_timing:
+                print(f"Converting to TCX activity format (with timing): {gpx_file_path.name}")
+                # For activities with timing, we should create a custom TCX
+                return self.create_garmin_activity_tcx(gpx_file_path, output_path)
+            else:
+                print(f"Converting to TCX course format (route): {gpx_file_path.name}")
 
-            # Convert to TCX format
+            # Convert to TCX format (course format for routes without timing)
             cmd = [
                 'gpsbabel',
                 '-i', 'gpx',
@@ -947,9 +1224,10 @@ class GPXScaler:
 
                     # Clean up temp file
                     try:
-                        os.remove(gpx_file_path)
-                    except:
-                        pass
+                        if os.path.exists(gpx_file_path):
+                            os.remove(gpx_file_path)
+                    except Exception:
+                        pass  # Silently ignore cleanup errors
 
                     return True
                 else:
@@ -1094,6 +1372,8 @@ def get_user_input():
         folder = "."
 
     scaler = GPXScaler()
+    config = scaler.load_config()
+
     if not scaler.find_gpx_files(folder):
         return None
 
@@ -1106,10 +1386,13 @@ def get_user_input():
         while True:
             try:
                 scale_input = input(
-                    "\nEnter scale factor "
+                    f"\nEnter scale factor (default: {config['scale']}) "
                     "(e.g., 0.5 for half size, 2.0 for double): "
                 ).strip()
-                scale_factor = float(scale_input)
+                if not scale_input:
+                    scale_factor = config['scale']
+                else:
+                    scale_factor = float(scale_input)
                 if scale_factor <= 0:
                     print("Scale factor must be positive.")
                     continue
@@ -1277,15 +1560,24 @@ def get_user_input():
 
 
 def main():
+    # Create scaler instance to load config defaults
+    scaler = GPXScaler()
+    config = scaler.load_config()
+
     parser = argparse.ArgumentParser(
         description="Scale GPX routes in distance and elevation with coordinate relocation"
     )
     parser.add_argument('--folder', default='.', help='Folder containing GPX files (default: current directory)')
-    parser.add_argument('--scale', type=float, help='Scaling factor for distance and elevation')
-    parser.add_argument('--min-distance', type=float, help='Minimum distance in km (scale will be adjusted if needed)')
-    parser.add_argument('--max-ascent', type=float, help='Maximum ascent in meters')
-    parser.add_argument('--start-lat', type=float, help='New starting latitude')
-    parser.add_argument('--start-lon', type=float, help='New starting longitude')
+    parser.add_argument('--scale', type=float, default=config["scale"],
+                       help=f'Scaling factor for distance and elevation (default: {config["scale"]})')
+    parser.add_argument('--min-distance', type=float, default=config["min_distance"],
+                       help='Minimum distance in km (scale will be adjusted if needed)')
+    parser.add_argument('--max-ascent', type=float, default=config["max_ascent"],
+                       help='Maximum ascent in meters')
+    parser.add_argument('--start-lat', type=float, default=config["start_lat"],
+                       help=f'New starting latitude (default: {config["start_lat"]})')
+    parser.add_argument('--start-lon', type=float, default=config["start_lon"],
+                       help=f'New starting longitude (default: {config["start_lon"]})')
     parser.add_argument('--terrain', type=int, choices=[1, 2, 3, 4, 5, 6],
                        help='Use predefined flat terrain coordinates (1-6, see --list-terrain)')
     parser.add_argument('--list-terrain', action='store_true',
@@ -1297,17 +1589,19 @@ def main():
     parser.add_argument('--clean-tcx', action='store_true',
                        help='Convert original GPX files to clean TCX '
                             'format without modifications')
-    parser.add_argument('--base-name', type=str,
+    parser.add_argument('--base-name', type=str, default=config["base_name"],
                        help='Base name for output files and track names '
                             '(e.g., "Stage" for Stage 1, Stage 2, etc.)')
 
     # Add timing-related arguments
+    timing_default = 'yes' if config["add_timing"] else 'no'
     parser.add_argument('--add-timing', action='store_true',
-                       help='Add timing data based on power and weight calculations')
-    parser.add_argument('--power', type=float,
-                       help='Average power output in watts (required with --add-timing)')
-    parser.add_argument('--weight', type=float,
-                       help='Total weight (rider + bike) in kg (required with --add-timing)')
+                       default=config["add_timing"],
+                       help=f'Add timing data based on power and weight calculations (default: {timing_default})')
+    parser.add_argument('--power', type=float, default=config["power"],
+                       help=f'Average power output in watts (default: {config["power"]}W)')
+    parser.add_argument('--weight', type=float, default=config["weight"],
+                       help=f'Total weight (rider + bike) in kg (default: {config["weight"]}kg)')
 
     # Keep --ocean and --list-oceans for backwards compatibility
     parser.add_argument('--ocean', type=int, choices=[1, 2, 3, 4, 5, 6],
@@ -1324,7 +1618,6 @@ def main():
 
     # Handle --list-terrain and --list-oceans flags (backwards compatibility)
     if args.list_terrain or args.list_oceans:
-        scaler = GPXScaler()
         flat_locations = scaler.get_flat_terrain_coordinates()
         print("Available Flat Terrain Coordinates:")
         print("=" * 50)
@@ -1347,7 +1640,6 @@ def main():
     start_lat_arg, start_lon_arg = args.start_lat, args.start_lon
     terrain_choice = args.terrain or args.ocean
     if terrain_choice:
-        scaler = GPXScaler()
         flat_locations = scaler.get_flat_terrain_coordinates()
         if 1 <= terrain_choice <= len(flat_locations):
             selected = flat_locations[terrain_choice - 1]
@@ -1362,7 +1654,6 @@ def main():
     # Check if all required arguments are provided (including ocean coordinates)
     if args.scale and (start_lat_arg is not None and start_lon_arg is not None):
         # Command line mode
-        scaler = GPXScaler()
         if not scaler.find_gpx_files(args.folder):
             sys.exit(1)
 
@@ -1391,7 +1682,6 @@ def main():
 
     # Handle clean TCX conversion mode
     elif args.clean_tcx:
-        scaler = GPXScaler()
         if not scaler.find_gpx_files(args.folder):
             sys.exit(1)
 

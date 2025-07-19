@@ -1,0 +1,12 @@
+{
+  "scale": 0.2,
+  "start_lat": 52.5,
+  "start_lon": 4.0,
+  "output_format": "tcx",
+  "base_name": "Test_No_Errors",
+  "add_timing": true,
+  "power": 300.0,
+  "weight": 80.0,
+  "min_distance": null,
+  "max_ascent": null
+}
