@@ -1132,7 +1132,7 @@ class GPXScaler:
             return False
 
     def convert_gpx_to_fit_format(self, gpx_file_path, output_path, has_timing=False):
-        """Convert GPX to FIT format using GPSBabel."""
+        """Convert GPX to FIT format using GPSBabel with optimized settings."""
         try:
             import subprocess
 
@@ -1147,17 +1147,25 @@ class GPXScaler:
 
             if has_timing:
                 print(f"Converting to FIT activity format (with timing): {gpx_file_path.name}")
+                # For activities with timing data, use specific FIT activity format
+                cmd = [
+                    'gpsbabel',
+                    '-i', 'gpx',
+                    '-f', str(gpx_file_path),
+                    '-o', 'garmin_fit,allpoints=1',  # Include all points for activities
+                    '-F', str(output_path)
+                ]
             else:
                 print(f"Converting to FIT course format (route): {gpx_file_path.name}")
-
-            # Convert to FIT format
-            cmd = [
-                'gpsbabel',
-                '-i', 'gpx',
-                '-f', str(gpx_file_path),
-                '-o', 'garmin_fit',
-                '-F', str(output_path)
-            ]
+                # For courses without timing, use course-specific options
+                cmd = [
+                    'gpsbabel',
+                    '-i', 'gpx',
+                    '-f', str(gpx_file_path),
+                    '-x', 'track,trk2rte',  # Convert tracks to routes for course format
+                    '-o', 'garmin_fit,course=1',  # Explicitly mark as course
+                    '-F', str(output_path)
+                ]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -1165,6 +1173,14 @@ class GPXScaler:
                 if (os.path.exists(output_path) and
                     os.path.getsize(output_path) > 0):
                     print(f"✅ FIT file created: {output_path}")
+
+                    # Validate FIT file size (FIT files should be reasonably sized)
+                    file_size = os.path.getsize(output_path)
+                    if file_size < 100:  # Very small files are likely invalid
+                        print(f"⚠️  Warning: FIT file is unusually small ({file_size} bytes)")
+                        print("   This may indicate conversion issues")
+                    else:
+                        print(f"   📊 FIT file size: {file_size:,} bytes")
 
                     # Clean up temp file
                     try:
@@ -1179,10 +1195,71 @@ class GPXScaler:
                     return False
             else:
                 print(f"❌ FIT conversion failed: {result.stderr}")
-                return False
+                # Try alternative FIT conversion if first attempt fails
+                print("🔄 Trying alternative FIT conversion method...")
+                return self._try_alternative_fit_conversion(gpx_file_path, output_path, has_timing)
 
         except Exception as e:
             print(f"❌ Error during FIT conversion: {e}")
+            return False
+
+    def _try_alternative_fit_conversion(self, gpx_file_path, output_path, has_timing=False):
+        """Alternative FIT conversion method with different GPSBabel options."""
+        try:
+            import subprocess
+
+            if has_timing:
+                print("   Trying activity-optimized FIT conversion...")
+                # Alternative command for activities
+                cmd = [
+                    'gpsbabel',
+                    '-i', 'gpx',
+                    '-f', str(gpx_file_path),
+                    '-x', 'track,name=Activity',  # Set track name
+                    '-o', 'garmin_fit',
+                    '-F', str(output_path)
+                ]
+            else:
+                print("   Trying simplified FIT course conversion...")
+                # Simplified conversion for courses
+                cmd = [
+                    'gpsbabel',
+                    '-i', 'gpx',
+                    '-f', str(gpx_file_path),
+                    '-x', 'simplify,count=500',  # Limit points for courses
+                    '-o', 'garmin_fit',
+                    '-F', str(output_path)
+                ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode == 0:
+                if (os.path.exists(output_path) and
+                    os.path.getsize(output_path) > 0):
+                    print(f"✅ Alternative FIT conversion successful: {output_path}")
+
+                    # Clean up temp file
+                    try:
+                        if os.path.exists(gpx_file_path):
+                            os.remove(gpx_file_path)
+                    except Exception:
+                        pass
+
+                    return True
+                else:
+                    print("❌ Alternative FIT conversion also failed")
+                    return False
+            else:
+                print(f"❌ Alternative FIT conversion failed: {result.stderr}")
+                print("\n💡 FIT TROUBLESHOOTING TIPS:")
+                print("   1. Try using TCX format instead (often more reliable)")
+                print("   2. Ensure your GPX has valid coordinates and elevation data")
+                print("   3. Check if GPSBabel is the latest version: brew upgrade gpsbabel")
+                print("   4. Some FIT files may work in Garmin Connect despite conversion warnings")
+                return False
+
+        except Exception as e:
+            print(f"❌ Error during alternative FIT conversion: {e}")
             return False
 
     def convert_gpx_to_tcx_format(self, gpx_file_path, output_path, has_timing=False):
@@ -1459,21 +1536,22 @@ def get_user_input():
     print("\n" + "="*80)
     print("OUTPUT FORMAT SELECTION")
     print("="*80)
-    print("TCX files often preserve elevation data better than FIT in Garmin Connect.")
-    print("Since Garmin zeroed your FIT elevation, we'll try TCX format instead.")
-    print("TCX is Garmin's Training Center format and typically respects elevation.")
+    print("📊 FORMAT RECOMMENDATIONS:")
+    print("• TCX: Best for Garmin Connect (preserves elevation, reliable import)")
+    print("• FIT: Native Garmin format (sometimes has import issues)")
+    print("• GPX: Universal format (good for most GPS devices)")
     print("="*80)
 
     print("Choose output format:")
     format_map = {'gpx': '1', 'tcx': '2', 'fit': '3'}
     default_format_num = format_map.get(config['output_format'], '2')
     format_default_text = {
-        '1': 'GPX', '2': 'TCX (better for Garmin Connect)', '3': 'FIT'
+        '1': 'GPX (universal)', '2': 'TCX (recommended for Garmin)', '3': 'FIT (native Garmin)'
     }[default_format_num]
 
-    print(f"1. GPX")
-    print(f"2. TCX (better for Garmin Connect)")
-    print(f"3. FIT (for Garmin devices)")
+    print(f"1. GPX (universal format)")
+    print(f"2. TCX (recommended for Garmin Connect)")
+    print(f"3. FIT (native Garmin format - may have import issues)")
 
     format_choice = input(f"Choose format (1/2/3, default: {default_format_num} - "
                          f"{format_default_text}): ").strip()
@@ -1484,6 +1562,10 @@ def get_user_input():
         output_format = 'gpx'
     elif format_choice == '3':
         output_format = 'fit'
+        print("\n⚠️  FIT Format Selected:")
+        print("   • FIT files may occasionally fail to import to Garmin Connect")
+        print("   • If import fails, try the TCX version instead")
+        print("   • FIT works best with timing data for activities")
     else:  # Default to TCX (option 2 or empty)
         output_format = 'tcx'
 
