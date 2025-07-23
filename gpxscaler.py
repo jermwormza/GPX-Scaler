@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 GPXScaler - A tool to scale GPX routes in distance and elevation with coordinate relocation.
@@ -14,21 +15,9 @@ import subprocess
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
-
-try:
-    import gpxpy
-    import gpxpy.gpx
-except ImportError:
-    print("Error: gpxpy library not found. Please install it with: pip install gpxpy")
-    sys.exit(1)
-
-
+import gpxpy
+import gpxpy.gpx
 class GPXScaler:
-    def __init__(self):
-        self.gpx_files = []
-        self.route_stats = {}
-        self.config_file = Path("gpx_scaler_config.json")
-
     def load_config(self):
         """Load configuration from JSON file."""
         default_config = {
@@ -58,14 +47,66 @@ class GPXScaler:
                 return default_config
         else:
             return default_config
+    def __init__(self):
+        self.gpx_files = []
+        self.route_stats = {}
+        self.config_file = Path("gpx_scaler_config.json")
+
+    def estimate_speed_physics(self, power, weight, gradient, cr=0.005, cda=0.3, rho=1.225, wind=0):
+        """
+        Physics-based speed estimation (matches frontend JS).
+        """
+        g = 9.81
+        v = 8.0
+        for _ in range(10):
+            rolling = cr * weight * g * v
+            air = 0.5 * cda * rho * (v + wind) ** 3
+            gravity = weight * g * gradient * v
+            f = rolling + air + gravity - power
+            df = cr * weight * g + 1.5 * cda * rho * (v + wind) ** 2 + weight * g * gradient
+            v = v - f / df
+            if v < 1:
+                v = 1
+        return v
+
+    def estimate_cycling_time_physics(self, distance_km, ascent_m, power=200, weight=75):
+        """
+        Physics-based cycling time estimation (matches frontend JS).
+        """
+        scaled_distance = distance_km
+        scaled_ascent = ascent_m
+        flat_distance = scaled_distance - (scaled_ascent / 1000)
+        ascent_distance = scaled_ascent / 1000
+
+        # Ascent segment
+        if ascent_distance > 0:
+            ascent_gradient = scaled_ascent / (ascent_distance * 1000)
+            ascent_speed = self.estimate_speed_physics(power, weight, ascent_gradient)
+            ascent_time = ascent_distance * 1000 / ascent_speed
+        else:
+            ascent_time = 0
+
+        # Flat segment
+        if flat_distance > 0:
+            flat_speed = self.estimate_speed_physics(power, weight, 0)
+            flat_time = flat_distance * 1000 / flat_speed
+        else:
+            flat_time = 0
+
+        total_time_hours = (ascent_time + flat_time) / 3600
+        return total_time_hours
+
+    # Move all helper methods into the class
+    def extract_stage_number(self, filename):
+        match = re.search(r'stage-(\d+)', filename.lower())
+        if match:
+            return int(match.group(1))
+        return float('inf'), filename
 
     def save_config(self, scale=None, start_lat=None, start_lon=None,
                    output_format=None, base_name=None, add_timing=None,
                    power=None, weight=None, min_distance=None, max_ascent=None):
-        """Save configuration to JSON file."""
         config = self.load_config()
-
-        # Update only provided parameters
         if scale is not None:
             config["scale"] = scale
         if start_lat is not None:
@@ -86,17 +127,15 @@ class GPXScaler:
             config["min_distance"] = min_distance
         if max_ascent is not None:
             config["max_ascent"] = max_ascent
-
         try:
             with open(self.config_file, 'w') as f:
                 json.dump(config, f, indent=2)
         except Exception as e:
             print(f"Warning: Could not save config file: {e}")
-
-    def extract_stage_number(self, filename):
-        """Extract stage number from filename for proper numerical sorting."""
-        # Look for patterns like "stage-1-", "stage-10-", etc.
-        match = re.search(r'stage-(\d+)', filename.lower())
+    # ...existing code...
+        total_time_hours = (ascent_time + flat_time) / 3600
+        return total_time_hours
+    # ...existing code...
         if match:
             return int(match.group(1))
         # If no stage number found, return filename for alphabetical sort
@@ -206,72 +245,39 @@ class GPXScaler:
 
     def calculate_total_ride_duration(self, gpx, power_watts, weight_kg):
         """
-        Calculate the total duration of a ride in seconds based on power/weight.
-
-        Args:
-            gpx: GPXpy object
-            power_watts: Average power output in watts
-            weight_kg: Total weight (rider + bike) in kg
-
-        Returns:
-            Total duration in seconds
+        Calculate total ride duration using physics-based algorithm (frontend match).
+        Returns total duration in seconds.
         """
-        total_seconds = 0
-
-        # Process tracks
+        # Try to get stats from GPXpy object directly
+        distance_km = 0
+        ascent_m = 0
         for track in gpx.tracks:
             for segment in track.segments:
                 if len(segment.points) < 2:
                     continue
-
-                for i in range(1, len(segment.points)):
-                    prev_point = segment.points[i-1]
-                    curr_point = segment.points[i]
-
-                    # Calculate distance and elevation change
-                    distance_m = self.calculate_distance(prev_point, curr_point)
-
-                    elevation_change = 0
-                    if (prev_point.elevation is not None and
-                        curr_point.elevation is not None):
-                        elevation_change = curr_point.elevation - prev_point.elevation
-
-                    # Calculate speed and time for this segment
-                    speed_ms = self.calculate_cycling_speed(
-                        power_watts, weight_kg, elevation_change, distance_m
-                    )
-
-                    # Calculate time for this segment
-                    time_seconds = distance_m / speed_ms
-                    total_seconds += time_seconds
-
-        # Process routes (similar logic)
+                # Use gpxpy's built-in length calculation (optimized)
+                segment_distance = segment.length_2d()
+                if segment_distance:
+                    distance_km += segment_distance / 1000
+                # Calculate elevation gains
+                uphill, _ = segment.get_uphill_downhill()
+                if uphill:
+                    ascent_m += uphill
         for route in gpx.routes:
             if len(route.points) < 2:
                 continue
+            points = route.points
+            for i in range(1, len(points)):
+                distance = self.calculate_distance(points[i-1], points[i])
+                distance_km += distance / 1000
+                if (points[i-1].elevation is not None and points[i].elevation is not None):
+                    elevation_change = points[i].elevation - points[i-1].elevation
+                    if elevation_change > 0:
+                        ascent_m += elevation_change
 
-            for i in range(1, len(route.points)):
-                prev_point = route.points[i-1]
-                curr_point = route.points[i]
-
-                # Calculate distance and elevation change
-                distance_m = self.calculate_distance(prev_point, curr_point)
-
-                elevation_change = 0
-                if (prev_point.elevation is not None and
-                    curr_point.elevation is not None):
-                    elevation_change = curr_point.elevation - prev_point.elevation
-
-                # Calculate speed and time for this segment
-                speed_ms = self.calculate_cycling_speed(
-                    power_watts, weight_kg, elevation_change, distance_m
-                )
-
-                # Calculate time for this segment
-                time_seconds = distance_m / speed_ms
-                total_seconds += time_seconds
-
-        return total_seconds
+        # Use physics-based algorithm
+        duration_hours = self.estimate_cycling_time_physics(distance_km, ascent_m, power_watts, weight_kg)
+        return duration_hours * 3600
 
     def add_timing_data_based_on_original(self, scaled_gpx, original_gpx, power_watts, weight_kg, start_time=None):
         """

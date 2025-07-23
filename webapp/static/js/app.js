@@ -7,10 +7,15 @@ class GPXScalerApp {
         this.processedFiles = new Map();
         this.originalElevationChart = null;
         this.scaledElevationChart = null;
+        this.originalMap = null;
+        this.scaledMap = null;
+        this.originalLayer = null;
+        this.scaledLayer = null;
 
         this.loadSavedParameters();
         this.initializeEventListeners();
         this.initializeCharts();
+        this.initializeMaps();
     }
 
     loadSavedParameters() {
@@ -87,12 +92,18 @@ class GPXScalerApp {
         dropZone.addEventListener('dragleave', this.handleDragLeave.bind(this));
         fileInput.addEventListener('change', this.handleFileSelect.bind(this));
 
+        // Set minimum for scaling sliders
+        const distanceScaleElem = document.getElementById('distanceScale');
+        const ascentScaleElem = document.getElementById('ascentScale');
+        if (distanceScaleElem) distanceScaleElem.setAttribute('min', '0.005');
+        if (ascentScaleElem) ascentScaleElem.setAttribute('min', '0.005');
+
         // Slider events
-        document.getElementById('distanceScale').addEventListener('input', () => {
+        distanceScaleElem.addEventListener('input', () => {
             this.updateScaleValues();
             this.saveParameters();
         });
-        document.getElementById('ascentScale').addEventListener('input', () => {
+        ascentScaleElem.addEventListener('input', () => {
             this.updateScaleValues();
             this.saveParameters();
         });
@@ -154,6 +165,24 @@ class GPXScalerApp {
     }
 
     initializeCharts() {
+        // Helper to compute average gradient over a window
+        function computeAverageGradient(elevations, distances, idx, windowSize = 5) {
+            const n = elevations.length;
+            const start = Math.max(0, idx - windowSize);
+            const end = Math.min(n - 1, idx + windowSize);
+            let totalElev = 0;
+            let totalDist = 0;
+            for (let i = start + 1; i <= end; i++) {
+                const dElev = Number(elevations[i]) - Number(elevations[i - 1]);
+                const dDist = Number(distances[i]) - Number(distances[i - 1]);
+                totalElev += dElev;
+                totalDist += dDist;
+            }
+            if (totalDist === 0) return null;
+            // dDist is in km, convert to m for gradient %
+            return (totalElev / (totalDist * 1000)) * 100;
+        }
+
         // Original elevation chart
         const originalCtx = document.getElementById('originalElevationChart').getContext('2d');
         this.originalElevationChart = new Chart(originalCtx, {
@@ -175,6 +204,28 @@ class GPXScalerApp {
                 plugins: {
                     legend: {
                         display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const idx = context.dataIndex;
+                                const elevations = context.chart.data.datasets[0].data;
+                                const distances = context.chart.data.labels;
+                                let elev = Math.round(Number(elevations[idx]));
+                                let label = `Elevation: ${elev} m`;
+                                if (elevations.length > 1 && idx > 0) {
+                                    const avgGradient = computeAverageGradient(elevations, distances, idx, 5);
+                                    if (avgGradient !== null) {
+                                        label += `, Gradient: ${avgGradient.toFixed(1)}%`;
+                                    } else {
+                                        label += ', Gradient: -';
+                                    }
+                                } else {
+                                    label += ', Gradient: -';
+                                }
+                                return label;
+                            }
+                        }
                     }
                 },
                 scales: {
@@ -219,6 +270,28 @@ class GPXScalerApp {
                 plugins: {
                     legend: {
                         display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const idx = context.dataIndex;
+                                const elevations = context.chart.data.datasets[0].data;
+                                const distances = context.chart.data.labels;
+                                let elev = Math.round(Number(elevations[idx]));
+                                let label = `Elevation: ${elev} m`;
+                                if (elevations.length > 1 && idx > 0) {
+                                    const avgGradient = computeAverageGradient(elevations, distances, idx, 5);
+                                    if (avgGradient !== null) {
+                                        label += `, Gradient: ${avgGradient.toFixed(1)}%`;
+                                    } else {
+                                        label += ', Gradient: -';
+                                    }
+                                } else {
+                                    label += ', Gradient: -';
+                                }
+                                return label;
+                            }
+                        }
                     }
                 },
                 scales: {
@@ -241,6 +314,44 @@ class GPXScalerApp {
                 }
             }
         });
+    }
+
+    initializeMaps() {
+        // Initialize original route map
+        const originalMapContainer = document.getElementById('originalRouteMap');
+        originalMapContainer.innerHTML = '<div id="originalMapLeaflet" style="height: 100%; width: 100%;"></div>';
+
+        this.originalMap = L.map('originalMapLeaflet', {
+            zoomControl: true,
+            attributionControl: false
+        }).setView([45.0, 2.0], 6); // Default view of France
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 18,
+            minZoom: 1
+        }).addTo(this.originalMap);
+
+        // Initialize scaled route map
+        const scaledMapContainer = document.getElementById('scaledRouteMap');
+        scaledMapContainer.innerHTML = '<div id="scaledMapLeaflet" style="height: 100%; width: 100%;"></div>';
+
+        this.scaledMap = L.map('scaledMapLeaflet', {
+            zoomControl: true,
+            attributionControl: false
+        }).setView([45.0, 2.0], 6); // Default view of France
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 18,
+            minZoom: 1
+        }).addTo(this.scaledMap);
+
+        // Initialize layer groups for route lines
+        this.originalLayer = L.layerGroup().addTo(this.originalMap);
+        this.scaledLayer = L.layerGroup().addTo(this.scaledMap);
     }
 
     handleDragOver(e) {
@@ -371,19 +482,55 @@ class GPXScalerApp {
         const scaledDistance = originalDistance * distanceScale;
         const scaledAscent = originalAscent * ascentScale;
 
-        // Calculate scaled duration using the same estimation approach as the backend
+        // Physics-based cycling time estimation
         const addTiming = document.getElementById('addTiming').checked;
         let scaledDuration = null;
 
         if (addTiming) {
-            // Simple estimation: distance_factor * 0.8 + ascent_factor * 0.2
-            const distanceFactor = distanceScale;
-            const ascentFactor = ascentScale;
-            const durationFactor = distanceFactor * 0.8 + ascentFactor * 0.2;
+            // Sensible defaults
+            const power = parseFloat(document.getElementById('powerWatts')?.value) || 200; // Watts
+            const weight = parseFloat(document.getElementById('weightKg')?.value) || 75; // kg (rider + bike)
+            const g = 9.81; // gravity
+            const Cr = 0.005; // rolling resistance
+            const CdA = 0.3; // drag area
+            const rho = 1.225; // air density
+            const wind = 0; // m/s
 
-            // Estimate original duration (rough calculation: 1 hour per 20km + 1 hour per 1000m ascent)
-            const estimatedOriginalDuration = (originalDistance / 20) + (originalAscent / 1000);
-            scaledDuration = estimatedOriginalDuration * durationFactor;
+            // Assume route is split into ascent and flat for estimation
+            // Flat distance (km)
+            const flatDistance = scaledDistance - (scaledAscent / 1000); // km
+            const ascentDistance = scaledAscent / 1000; // km
+
+            // Helper to estimate speed for a segment
+            function estimateSpeed(power, weight, gradient) {
+                // Solve for v in: P = (Cr*m*g*v) + (0.5*CdA*rho*v^3) + (m*g*sin(theta)*v)
+                // For small gradients, sin(theta) ~ gradient
+                // Use Newton's method for v
+                let v = 8; // initial guess (m/s)
+                for (let i = 0; i < 10; i++) {
+                    const rolling = Cr * weight * g * v;
+                    const air = 0.5 * CdA * rho * Math.pow(v + wind, 3);
+                    const gravity = weight * g * gradient * v;
+                    const f = rolling + air + gravity - power;
+                    // Derivative wrt v
+                    const df = Cr * weight * g + 1.5 * CdA * rho * Math.pow(v + wind, 2) + weight * g * gradient;
+                    v = v - f / df;
+                    if (v < 1) v = 1; // don't allow negative/zero speed
+                }
+                return v; // m/s
+            }
+
+            // Estimate time for ascent
+            const ascentGradient = scaledAscent / (ascentDistance * 1000); // total ascent over ascent distance
+            const ascentSpeed = estimateSpeed(power, weight, ascentGradient);
+            const ascentTime = ascentDistance * 1000 / ascentSpeed; // seconds
+
+            // Estimate time for flat
+            const flatSpeed = estimateSpeed(power, weight, 0);
+            const flatTime = flatDistance * 1000 / flatSpeed; // seconds
+
+            // Total time in hours
+            scaledDuration = (ascentTime + flatTime) / 3600;
         }
 
         return {
@@ -400,35 +547,105 @@ class GPXScalerApp {
         this.uploadedFiles.forEach((file, fileId) => {
             const scaledValues = this.calculateScaledValues(file.distance, file.ascent);
 
+            // Try to get backend timing value if available
+            let scaledDurationHours = null;
+            let originalDurationHours = null;
+            if (file.timingData && file.timingData.scaled_duration_hours) {
+                scaledDurationHours = file.timingData.scaled_duration_hours;
+            } else if (scaledValues.duration) {
+                scaledDurationHours = scaledValues.duration;
+            }
+
+            // Calculate original duration if timing is enabled
+            let addTiming = document.getElementById('addTiming').checked;
+            if (addTiming) {
+                const power = parseFloat(document.getElementById('powerWatts')?.value) || 200;
+                const weight = parseFloat(document.getElementById('weightKg')?.value) || 75;
+                const g = 9.81;
+                const Cr = 0.005;
+                const CdA = 0.3;
+                const rho = 1.225;
+                const wind = 0;
+                const originalDistance = file.distance;
+                const originalAscent = file.ascent;
+                const flatDistanceOrig = originalDistance - (originalAscent / 1000);
+                const ascentDistanceOrig = originalAscent / 1000;
+                function estimateSpeed(power, weight, gradient) {
+                    let v = 8;
+                    for (let i = 0; i < 10; i++) {
+                        const rolling = Cr * weight * g * v;
+                        const air = 0.5 * CdA * rho * Math.pow(v + wind, 3);
+                        const gravity = weight * g * gradient * v;
+                        const f = rolling + air + gravity - power;
+                        const df = Cr * weight * g + 1.5 * CdA * rho * Math.pow(v + wind, 2) + weight * g * gradient;
+                        v = v - f / df;
+                        if (v < 1) v = 1;
+                    }
+                    return v;
+                }
+                const ascentGradientOrig = originalAscent / (ascentDistanceOrig * 1000);
+                const ascentSpeedOrig = estimateSpeed(power, weight, ascentGradientOrig);
+                const ascentTimeOrig = ascentDistanceOrig * 1000 / ascentSpeedOrig;
+                const flatSpeedOrig = estimateSpeed(power, weight, 0);
+                const flatTimeOrig = flatDistanceOrig * 1000 / flatSpeedOrig;
+                originalDurationHours = (ascentTimeOrig + flatTimeOrig) / 3600;
+            }
+
+            let originalDurationBadge = '';
+            let scaledDurationBadge = '';
+            if (originalDurationHours) {
+                const hours = Math.floor(originalDurationHours);
+                const minutes = Math.round((originalDurationHours - hours) * 60);
+                originalDurationBadge = `<span class="badge bg-secondary me-1" title="Original Duration">${hours}h ${minutes}m</span>`;
+            }
+            if (scaledDurationHours) {
+                const hours = Math.floor(scaledDurationHours);
+                const minutes = Math.round((scaledDurationHours - hours) * 60);
+                scaledDurationBadge = `<span class="badge bg-info me-1" title="Scaled Duration">${hours}h ${minutes}m</span>`;
+            }
+
             const fileElement = document.createElement('div');
             fileElement.className = `file-item ${fileId === this.selectedFileId ? 'selected' : ''}`;
-
-            let durationBadge = '';
-            if (scaledValues.duration) {
-                const hours = Math.floor(scaledValues.duration);
-                const minutes = Math.round((scaledValues.duration - hours) * 60);
-                durationBadge = `<span class="badge bg-info me-1">${hours}h ${minutes}m</span>`;
-            }
 
             fileElement.innerHTML = `
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="fw-bold">${file.filename}</span>
-                    <i class="fas fa-eye"></i>
+                    <span class="d-flex align-items-center">
+                        <i class="fas fa-eye me-2"></i>
+                        <button class="btn btn-sm btn-outline-danger remove-file-btn" title="Remove file" style="padding:0.25rem 0.5rem;display:inline-flex;align-items:center;">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </span>
                 </div>
                 <div class="file-stats">
                     <div class="mb-1">
                         <small class="text-muted me-2">Original:</small>
                         <span class="badge bg-secondary me-1">${file.distance} km</span>
                         <span class="badge bg-secondary me-1">${file.ascent} m</span>
+                        ${originalDurationBadge}
                     </div>
                     <div>
                         <small class="text-muted me-2">Scaled:</small>
                         <span class="badge bg-primary me-1">${scaledValues.distance.toFixed(1)} km</span>
                         <span class="badge bg-success me-1">${scaledValues.ascent.toFixed(0)} m</span>
-                        ${durationBadge}
+                        ${scaledDurationBadge}
                     </div>
                 </div>
             `;
+
+            // Remove file button
+            const removeBtn = fileElement.querySelector('.remove-file-btn');
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.uploadedFiles.delete(fileId);
+                if (this.selectedFileId === fileId) {
+                    // Select another file if available
+                    const nextId = Array.from(this.uploadedFiles.keys())[0];
+                    this.selectedFileId = nextId || null;
+                }
+                this.updateUploadedFilesList();
+                this.updateProcessButton();
+            });
 
             fileElement.addEventListener('click', () => this.selectFile(fileId));
             container.appendChild(fileElement);
@@ -450,7 +667,58 @@ class GPXScalerApp {
             if (result.success) {
                 // Update charts and statistics with original data
                 this.updateElevationChart(result.route_data);
-                this.updateStatistics(result.route_data);
+
+                // Always calculate original and scaled timing if timing is enabled
+                let timingData = result.timing || {};
+                const addTiming = document.getElementById('addTiming').checked;
+                if (addTiming) {
+                    const power = parseFloat(document.getElementById('powerWatts')?.value) || 200;
+                    const weight = parseFloat(document.getElementById('weightKg')?.value) || 75;
+                    const g = 9.81;
+                    const Cr = 0.005;
+                    const CdA = 0.3;
+                    const rho = 1.225;
+                    const wind = 0;
+                    // Original
+                    const originalDistance = result.route_data.total_distance;
+                    const originalAscent = result.route_data.total_ascent;
+                    const flatDistanceOrig = originalDistance - (originalAscent / 1000);
+                    const ascentDistanceOrig = originalAscent / 1000;
+                    function estimateSpeed(power, weight, gradient) {
+                        let v = 8;
+                        for (let i = 0; i < 10; i++) {
+                            const rolling = Cr * weight * g * v;
+                            const air = 0.5 * CdA * rho * Math.pow(v + wind, 3);
+                            const gravity = weight * g * gradient * v;
+                            const f = rolling + air + gravity - power;
+                            const df = Cr * weight * g + 1.5 * CdA * rho * Math.pow(v + wind, 2) + weight * g * gradient;
+                            v = v - f / df;
+                            if (v < 1) v = 1;
+                        }
+                        return v;
+                    }
+                    const ascentGradientOrig = originalAscent / (ascentDistanceOrig * 1000);
+                    const ascentSpeedOrig = estimateSpeed(power, weight, ascentGradientOrig);
+                    const ascentTimeOrig = ascentDistanceOrig * 1000 / ascentSpeedOrig;
+                    const flatSpeedOrig = estimateSpeed(power, weight, 0);
+                    const flatTimeOrig = flatDistanceOrig * 1000 / flatSpeedOrig;
+                    timingData.original_duration_hours = (ascentTimeOrig + flatTimeOrig) / 3600;
+
+                    // Scaled (if available)
+                    if (result.scaled) {
+                        const scaledDistance = result.scaled.total_distance;
+                        const scaledAscent = result.scaled.total_ascent;
+                        const flatDistanceScaled = scaledDistance - (scaledAscent / 1000);
+                        const ascentDistanceScaled = scaledAscent / 1000;
+                        const ascentGradientScaled = scaledAscent / (ascentDistanceScaled * 1000);
+                        const ascentSpeedScaled = estimateSpeed(power, weight, ascentGradientScaled);
+                        const ascentTimeScaled = ascentDistanceScaled * 1000 / ascentSpeedScaled;
+                        const flatSpeedScaled = estimateSpeed(power, weight, 0);
+                        const flatTimeScaled = flatDistanceScaled * 1000 / flatSpeedScaled;
+                        timingData.scaled_duration_hours = (ascentTimeScaled + flatTimeScaled) / 3600;
+                    }
+                }
+                this.updateStatistics(result.route_data, result.scaled || null, timingData);
 
                 // Now also get the scaled version immediately
                 await this.updatePreview();
@@ -500,7 +768,57 @@ class GPXScalerApp {
             if (result.success) {
                 this.updateRoutePreview(result.original, result.scaled);
                 this.updateElevationChart(result.original, result.scaled);
-                this.updateStatistics(result.original, result.scaled, result.timing);
+
+                // Always calculate original and scaled timing if timing is enabled
+                let timingData = result.timing || {};
+                if (addTiming) {
+                    const power = parseFloat(document.getElementById('powerWatts')?.value) || 200;
+                    const weight = parseFloat(document.getElementById('weightKg')?.value) || 75;
+                    const g = 9.81;
+                    const Cr = 0.005;
+                    const CdA = 0.3;
+                    const rho = 1.225;
+                    const wind = 0;
+                    // Original
+                    const originalDistance = result.original.total_distance;
+                    const originalAscent = result.original.total_ascent;
+                    const flatDistanceOrig = originalDistance - (originalAscent / 1000);
+                    const ascentDistanceOrig = originalAscent / 1000;
+                    function estimateSpeed(power, weight, gradient) {
+                        let v = 8;
+                        for (let i = 0; i < 10; i++) {
+                            const rolling = Cr * weight * g * v;
+                            const air = 0.5 * CdA * rho * Math.pow(v + wind, 3);
+                            const gravity = weight * g * gradient * v;
+                            const f = rolling + air + gravity - power;
+                            const df = Cr * weight * g + 1.5 * CdA * rho * Math.pow(v + wind, 2) + weight * g * gradient;
+                            v = v - f / df;
+                            if (v < 1) v = 1;
+                        }
+                        return v;
+                    }
+                    const ascentGradientOrig = originalAscent / (ascentDistanceOrig * 1000);
+                    const ascentSpeedOrig = estimateSpeed(power, weight, ascentGradientOrig);
+                    const ascentTimeOrig = ascentDistanceOrig * 1000 / ascentSpeedOrig;
+                    const flatSpeedOrig = estimateSpeed(power, weight, 0);
+                    const flatTimeOrig = flatDistanceOrig * 1000 / flatSpeedOrig;
+                    timingData.original_duration_hours = (ascentTimeOrig + flatTimeOrig) / 3600;
+
+                    // Scaled
+                    if (result.scaled) {
+                        const scaledDistance = result.scaled.total_distance;
+                        const scaledAscent = result.scaled.total_ascent;
+                        const flatDistanceScaled = scaledDistance - (scaledAscent / 1000);
+                        const ascentDistanceScaled = scaledAscent / 1000;
+                        const ascentGradientScaled = scaledAscent / (ascentDistanceScaled * 1000);
+                        const ascentSpeedScaled = estimateSpeed(power, weight, ascentGradientScaled);
+                        const ascentTimeScaled = ascentDistanceScaled * 1000 / ascentSpeedScaled;
+                        const flatSpeedScaled = estimateSpeed(power, weight, 0);
+                        const flatTimeScaled = flatDistanceScaled * 1000 / flatSpeedScaled;
+                        timingData.scaled_duration_hours = (ascentTimeScaled + flatTimeScaled) / 3600;
+                    }
+                }
+                this.updateStatistics(result.original, result.scaled, timingData);
             }
         } catch (error) {
             console.error('Preview update failed:', error);
@@ -509,257 +827,83 @@ class GPXScalerApp {
 
     updateRoutePreview(originalData, scaledData = null) {
         console.log('updateRoutePreview called with:', { originalData, scaledData });
-        const originalCanvas = document.getElementById('originalRouteCanvas');
-        const scaledCanvas = document.getElementById('scaledRouteCanvas');
 
-        console.log('Canvas elements found:', { originalCanvas, scaledCanvas });
-
-        // Clear previous content
-        originalCanvas.innerHTML = '';
-        scaledCanvas.innerHTML = '';
+        // Clear previous route layers
+        if (this.originalLayer) {
+            this.originalLayer.clearLayers();
+        }
+        if (this.scaledLayer) {
+            this.scaledLayer.clearLayers();
+        }
 
         if (!originalData || !originalData.points || originalData.points.length === 0) {
             console.log('No original data available');
-            originalCanvas.innerHTML = '<p class="text-muted text-center">No route data available</p>';
-            scaledCanvas.innerHTML = '<p class="text-muted text-center">Adjust sliders to see scaled route</p>';
             return;
         }
 
         try {
             console.log('Updating route preview with data:', { originalData, scaledData });
 
-            // Create and update original route SVG
-            this.updateSingleRouteCanvasWithData(originalCanvas, originalData.points, 'route-original');
+            // Update original route on map
+            this.updateRouteOnMap(this.originalMap, this.originalLayer, originalData.points, '#6c757d');
 
-            // Create and update scaled route SVG if available
+            // Update scaled route on map if available
             if (scaledData && scaledData.points) {
-                this.updateSingleRouteCanvasWithData(scaledCanvas, scaledData.points, 'route-scaled');
-            } else {
-                scaledCanvas.innerHTML = '<p class="text-muted text-center">Adjust sliders to see scaled route</p>';
+                this.updateRouteOnMap(this.scaledMap, this.scaledLayer, scaledData.points, '#0d6efd');
             }
 
         } catch (error) {
             console.error('Error updating route preview:', error);
-            originalCanvas.innerHTML = `<p class="text-danger text-center">Error displaying route: ${error.message}</p>`;
-            scaledCanvas.innerHTML = `<p class="text-danger text-center">Error displaying route: ${error.message}</p>`;
             this.showError('Failed to display route preview: ' + error.message);
         }
     }
 
-    updateSingleRouteCanvas(canvas, points, bounds, scale, routeClass) {
-        // Create SVG
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('class', 'route-svg');
-        svg.setAttribute('viewBox', '0 0 300 300');
-
-        // Calculate proper centering offset
-        const { offsetX, offsetY } = this.calculateOffset(bounds, scale, 300, 300);
-
-        // Draw route with centered positioning
-        this.drawRoute(svg, points, bounds, scale, routeClass, offsetX, offsetY);
-
-        // Add start/end markers with centered positioning
-        this.addRouteMarkers(svg, points, bounds, scale, offsetX, offsetY);
-
-        canvas.appendChild(svg);
-    }
-
-    updateSingleRouteCanvasWithData(canvas, points, routeClass) {
+    updateRouteOnMap(map, layer, points, color) {
         if (!points || points.length < 2) {
-            canvas.innerHTML = '<p class="text-muted text-center">No route data available</p>';
             return;
         }
 
-        // Calculate bounds for this specific route
-        const bounds = this.calculateSingleRouteBounds(points);
-        console.log('Calculated bounds for', routeClass, ':', bounds);
+        // Convert points to Leaflet LatLng format
+        const latLngs = points.map(point => [point.lat, point.lon]);
 
-        if (!this.isValidBounds(bounds)) {
-            throw new Error('Invalid route bounds calculated for ' + routeClass);
-        }
+        // Create polyline for the route
+        const polyline = L.polyline(latLngs, {
+            color: color,
+            weight: 3,
+            opacity: 0.8
+        });
 
-        const scale = this.calculateScale(bounds, 300, 300);
-        console.log('Calculated scale for', routeClass, ':', scale);
+        // Add polyline to layer
+        layer.addLayer(polyline);
 
-        if (!isFinite(scale) || scale <= 0) {
-            throw new Error('Invalid scale calculated for ' + routeClass);
-        }
+        // Add start marker (green)
+        const startMarker = L.circleMarker([points[0].lat, points[0].lon], {
+            radius: 6,
+            fillColor: '#28a745',
+            color: '#fff',
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 0.8
+        });
+        layer.addLayer(startMarker);
 
-        // Create SVG
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('class', 'route-svg');
-        svg.setAttribute('viewBox', '0 0 300 300');
-
-        // Calculate proper centering offset
-        const { offsetX, offsetY } = this.calculateOffset(bounds, scale, 300, 300);
-
-        // Draw route with centered positioning
-        this.drawRoute(svg, points, bounds, scale, routeClass, offsetX, offsetY);
-
-        // Add start/end markers with centered positioning
-        this.addRouteMarkers(svg, points, bounds, scale, offsetX, offsetY);
-
-        canvas.appendChild(svg);
-    }
-
-    calculateSingleRouteBounds(points) {
-        const lats = points.map(p => p.lat).filter(lat => isFinite(lat));
-        const lons = points.map(p => p.lon).filter(lon => isFinite(lon));
-
-        if (lats.length === 0 || lons.length === 0) {
-            throw new Error('No valid coordinate data found');
-        }
-
-        return {
-            minLat: Math.min(...lats),
-            maxLat: Math.max(...lats),
-            minLon: Math.min(...lons),
-            maxLon: Math.max(...lons)
-        };
-    }
-
-    calculateViewBounds(originalData, scaledData = null) {
-        const allPoints = [...originalData.points];
-        if (scaledData && scaledData.points) {
-            allPoints.push(...scaledData.points);
-        }
-
-        const lats = allPoints.map(p => p.lat).filter(lat => isFinite(lat));
-        const lons = allPoints.map(p => p.lon).filter(lon => isFinite(lon));
-
-        if (lats.length === 0 || lons.length === 0) {
-            throw new Error('No valid coordinate data found');
-        }
-
-        return {
-            minLat: Math.min(...lats),
-            maxLat: Math.max(...lats),
-            minLon: Math.min(...lons),
-            maxLon: Math.max(...lons)
-        };
-    }
-
-    isValidBounds(bounds) {
-        return bounds &&
-               isFinite(bounds.minLat) && isFinite(bounds.maxLat) &&
-               isFinite(bounds.minLon) && isFinite(bounds.maxLon) &&
-               bounds.maxLat > bounds.minLat &&
-               bounds.maxLon > bounds.minLon;
-    }
-
-    calculateScale(bounds, width, height) {
-        const latRange = bounds.maxLat - bounds.minLat;
-        const lonRange = bounds.maxLon - bounds.minLon;
-
-        // Add some padding (10% on each side)
-        const padding = 0.1;
-        const availableWidth = width * (1 - 2 * padding);
-        const availableHeight = height * (1 - 2 * padding);
-
-        const scaleX = availableWidth / lonRange;
-        const scaleY = availableHeight / latRange;
-
-        return Math.min(scaleX, scaleY);
-    }
-
-    calculateOffset(bounds, scale, viewWidth, viewHeight) {
-        const latRange = bounds.maxLat - bounds.minLat;
-        const lonRange = bounds.maxLon - bounds.minLon;
-
-        // Calculate the size of the route in pixels
-        const routeWidth = lonRange * scale;
-        const routeHeight = latRange * scale;
-
-        // Center the route in the viewport
-        const offsetX = (viewWidth - routeWidth) / 2;
-        const offsetY = (viewHeight - routeHeight) / 2;
-
-        return { offsetX, offsetY };
-    }
-
-    drawRoute(svg, points, bounds, scale, className, offsetX, offsetY) {
-        if (!points || points.length < 2) return;
-
-        try {
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('class', `route-path ${className}`);
-
-            let pathData = '';
-            let validPointCount = 0;
-
-            points.forEach((point, index) => {
-                if (!point || !isFinite(point.lat) || !isFinite(point.lon)) {
-                    console.warn(`Invalid point at index ${index}:`, point);
-                    return;
-                }
-
-                const x = (point.lon - bounds.minLon) * scale + offsetX;
-                const y = (bounds.maxLat - point.lat) * scale + offsetY; // Flip Y for north-up
-
-                if (!isFinite(x) || !isFinite(y)) {
-                    console.warn(`Invalid coordinates calculated for point ${index}: x=${x}, y=${y}`);
-                    return;
-                }
-
-                if (validPointCount === 0) {
-                    pathData += `M ${x} ${y}`;
-                } else {
-                    pathData += ` L ${x} ${y}`;
-                }
-                validPointCount++;
+        // Add end marker (red)
+        if (points.length > 1) {
+            const endPoint = points[points.length - 1];
+            const endMarker = L.circleMarker([endPoint.lat, endPoint.lon], {
+                radius: 6,
+                fillColor: '#dc3545',
+                color: '#fff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
             });
-
-            if (validPointCount < 2) {
-                throw new Error(`Not enough valid points to draw route (${validPointCount})`);
-            }
-
-            path.setAttribute('d', pathData);
-            svg.appendChild(path);
-
-        } catch (error) {
-            console.error('Error drawing route:', error);
-            throw error;
+            layer.addLayer(endMarker);
         }
-    }
 
-    addRouteMarkers(svg, points, bounds, scale, offsetX, offsetY) {
-        if (!points || points.length === 0) return;
-
-        try {
-            // Start marker (green)
-            const startPoint = points[0];
-            if (startPoint && isFinite(startPoint.lat) && isFinite(startPoint.lon)) {
-                const startX = (startPoint.lon - bounds.minLon) * scale + offsetX;
-                const startY = (bounds.maxLat - startPoint.lat) * scale + offsetY;
-
-                if (isFinite(startX) && isFinite(startY)) {
-                    const startMarker = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                    startMarker.setAttribute('class', 'route-point route-start');
-                    startMarker.setAttribute('cx', startX);
-                    startMarker.setAttribute('cy', startY);
-                    svg.appendChild(startMarker);
-                }
-            }
-
-            // End marker (red)
-            if (points.length > 1) {
-                const endPoint = points[points.length - 1];
-                if (endPoint && isFinite(endPoint.lat) && isFinite(endPoint.lon)) {
-                    const endX = (endPoint.lon - bounds.minLon) * scale + offsetX;
-                    const endY = (bounds.maxLat - endPoint.lat) * scale + offsetY;
-
-                    if (isFinite(endX) && isFinite(endY)) {
-                        const endMarker = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                        endMarker.setAttribute('class', 'route-point route-end');
-                        endMarker.setAttribute('cx', endX);
-                        endMarker.setAttribute('cy', endY);
-                        svg.appendChild(endMarker);
-                    }
-                }
-            }
-        } catch (error) {
-            console.error('Error adding route markers:', error);
-        }
+        // Fit map to route bounds with padding
+        const bounds = L.latLngBounds(latLngs);
+        map.fitBounds(bounds, { padding: [20, 20] });
     }
 
     updateElevationChart(originalData, scaledData = null) {
