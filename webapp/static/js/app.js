@@ -299,6 +299,12 @@ class GPXScalerApp {
         if (ascentScale) {
             ascentScale.addEventListener('input', () => this.updateScaleValues());
         }
+
+        // Process All Files button event
+        const processAllBtn = document.getElementById('processAllBtn');
+        if (processAllBtn) {
+            processAllBtn.addEventListener('click', () => this.processAllFiles());
+        }
     }
 
     async uploadFiles(files) {
