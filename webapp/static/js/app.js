@@ -346,15 +346,11 @@ class GPXScalerApp {
         files.forEach((file, index) => {
             if (file instanceof File) {
                 formData.append('files', file);
-                console.log('[DEBUG] Appending file as files:', file.name, file.type, file.size);
+                // Appending file as files
             } else {
-                console.error('[DEBUG] Not a File object:', file);
+                // Not a File object
             }
         });
-        // Debug: log FormData keys and values
-        for (let pair of formData.entries()) {
-            console.log('[DEBUG] FormData:', pair[0], pair[1]);
-        }
         const uploadPromise = new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('POST', '/upload');
@@ -366,7 +362,6 @@ class GPXScalerApp {
                 }
             };
             xhr.onload = () => {
-                console.log('[DEBUG] Upload response:', xhr.status, xhr.statusText, xhr.responseText);
                 if (xhr.status === 200) {
                     try {
                         const result = JSON.parse(xhr.responseText);
@@ -387,14 +382,10 @@ class GPXScalerApp {
 
         try {
             const results = await Promise.all(uploadPromises);
-            // Debug: log backend results
-            console.log('[DEBUG] Upload results:', results);
             // The backend returns an object with 'files': [ ... ]
             results.forEach((result) => {
-                console.log('[DEBUG] Processing result:', result);
                 if (result.success && Array.isArray(result.files)) {
                     result.files.forEach(fileObj => {
-                        console.log('[DEBUG] File object:', fileObj);
                         if (fileObj.id) {
                             this.uploadedFiles.set(fileObj.id, {
                                 filename: fileObj.filename,
@@ -406,7 +397,6 @@ class GPXScalerApp {
                     });
                 }
             });
-            console.log('[DEBUG] uploadedFiles map after upload:', Array.from(this.uploadedFiles.entries()));
             this.updateUploadedFilesList();
             this.updateProcessButton();
             // Automatically select the first file after upload if any
@@ -649,12 +639,9 @@ class GPXScalerApp {
         this.updateUploadedFilesList();
 
         try {
-            console.log('Selecting file:', fileId);
-
             // Get original route data
             const response = await fetch(`/preview/${fileId}`);
             const result = await response.json();
-            console.log('Preview response:', result);
 
             if (result.success) {
                 // Update charts and statistics with original data
@@ -818,8 +805,6 @@ class GPXScalerApp {
     }
 
     updateRoutePreview(originalData, scaledData = null) {
-        console.log('updateRoutePreview called with:', { originalData, scaledData });
-
         // Clear previous route layers
         if (this.originalLayer) {
             this.originalLayer.clearLayers();
@@ -829,13 +814,10 @@ class GPXScalerApp {
         }
 
         if (!originalData || !originalData.points || originalData.points.length === 0) {
-            console.log('No original data available');
             return;
         }
 
         try {
-            console.log('Updating route preview with data:', { originalData, scaledData });
-
             // Update original route on map
             this.updateRouteOnMap(this.originalMap, this.originalLayer, originalData.points, '#6c757d');
 
@@ -845,7 +827,6 @@ class GPXScalerApp {
             }
 
         } catch (error) {
-            console.error('Error updating route preview:', error);
             this.showError('Failed to display route preview: ' + error.message);
         }
     }
@@ -1027,20 +1008,15 @@ class GPXScalerApp {
     updateProcessButton() {
         const button = document.getElementById('processAllBtn');
         const disabled = this.uploadedFiles.size === 0;
-        console.log('updateProcessButton called, files:', this.uploadedFiles.size, 'disabled:', disabled);
         button.disabled = disabled;
     }
 
     async processAllFiles() {
 
-        console.log('processAllFiles called, uploaded files count:', this.uploadedFiles.size);
-
         if (this.uploadedFiles.size === 0) {
-            console.log('No files to process, returning');
             return;
         }
 
-        console.log('Starting file processing...');
         const fileIds = Array.from(this.uploadedFiles.keys());
         const distanceScale = parseFloat(document.getElementById('distanceScale').value);
         const ascentScale = parseFloat(document.getElementById('ascentScale').value);
@@ -1051,9 +1027,6 @@ class GPXScalerApp {
         const addTiming = document.getElementById('addTiming').checked;
         const powerWatts = addTiming ? parseInt(document.getElementById('powerWatts').value) : null;
         const weightKg = addTiming ? parseInt(document.getElementById('weightKg').value) : null;
-
-        // TRACE: Log the scale values being sent
-        console.log('[TRACE] processAllFiles: distanceScale =', distanceScale, ', ascentScale =', ascentScale);
 
         const requestData = {
             file_ids: fileIds,
@@ -1068,8 +1041,6 @@ class GPXScalerApp {
             weight_kg: weightKg
         };
 
-        console.log('[TRACE] processAllFiles: requestData =', requestData);
-
         try {
             this.showProcessingProgress(true);
             this.initializeFileProgressBars(fileIds);
@@ -1083,19 +1054,15 @@ class GPXScalerApp {
             });
 
             const result = await response.json();
-            console.log('Process response:', result);
 
             if (result.success && result.session_id) {
-                console.log('Starting progress tracking for session:', result.session_id);
                 // Start listening for progress updates
                 this.trackProgress(result.session_id);
             } else {
-                console.error('Processing failed:', result.error);
                 this.showError(result.error || 'Failed to start processing');
                 this.showProcessingProgress(false);
             }
         } catch (error) {
-            console.error('Processing error:', error);
             this.showError('Processing failed: ' + error.message);
             this.showProcessingProgress(false);
         }
@@ -1276,20 +1243,17 @@ class GPXScalerApp {
     }
 
     trackProgress(sessionId) {
-        console.log('Starting progress tracking for session:', sessionId);
         const eventSource = new EventSource(`/progress/${sessionId}`);
 
+
         eventSource.onmessage = (event) => {
-            console.log('Progress event received:', event.data);
             const data = JSON.parse(event.data);
             this.updateProgressDisplay(data);
 
             if (data.status === 'completed') {
-                console.log('Processing completed');
                 eventSource.close();
                 this.handleProcessingComplete(data);
             } else if (data.status === 'failed') {
-                console.log('Processing failed:', data.error);
                 eventSource.close();
                 this.showError(`Processing failed: ${data.error || 'Unknown error'}`);
                 this.showProcessingProgress(false);
@@ -1297,19 +1261,17 @@ class GPXScalerApp {
         };
 
         eventSource.onerror = (error) => {
-            console.error('EventSource error:', error);
             eventSource.close();
             this.showError('Lost connection to progress updates');
             this.showProcessingProgress(false);
         };
 
         eventSource.onopen = () => {
-            console.log('EventSource connection opened');
+            // EventSource connection opened
         };
     }
 
     updateProgressDisplay(data) {
-        console.log('Updating progress display:', data);
 
         // Update overall progress
         const overallProgress = (data.current_file / data.total_files) * 100;
@@ -1323,9 +1285,9 @@ class GPXScalerApp {
             if (data.current_filename) {
                 overallText.textContent += ` (${data.current_filename})`;
             }
-            console.log('Updated overall progress:', overallProgress + '%');
+            // Updated overall progress
         } else {
-            console.error('Progress elements not found');
+            // Progress elements not found
         }
 
         // Update individual file progress
