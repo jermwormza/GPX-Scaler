@@ -1,6 +1,8 @@
 // GPX Scaler Web App JavaScript
 
 class GPXScalerApp {
+    // Add a lock to prevent concurrent updateUploadedFilesList calls
+    _updatingFilesList = false;
     constructor() {
         this.uploadedFiles = new Map();
         this.selectedFileId = null;
@@ -18,6 +20,145 @@ class GPXScalerApp {
         this.initializeMaps();
     }
 
+    initializeMaps() {
+        // Assumes Leaflet.js is loaded and map containers exist
+        const originalMapElem = document.getElementById('originalRouteMap');
+        const scaledMapElem = document.getElementById('scaledRouteMap');
+        if (!originalMapElem || !scaledMapElem) return;
+
+        // Set map container height if needed
+        originalMapElem.style.height = '260px';
+        scaledMapElem.style.height = '260px';
+
+        // Initialize maps
+        this.originalMap = L.map(originalMapElem, {
+            zoomControl: false,
+            attributionControl: false
+        }).setView([52.5, 4.0], 10);
+        this.scaledMap = L.map(scaledMapElem, {
+            zoomControl: false,
+            attributionControl: false
+        }).setView([52.5, 4.0], 10);
+
+        // Add tile layers
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(this.originalMap);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(this.scaledMap);
+
+        // Add route layers
+        this.originalLayer = L.layerGroup().addTo(this.originalMap);
+        this.scaledLayer = L.layerGroup().addTo(this.scaledMap);
+    }
+
+    initializeCharts() {
+        // Assumes Chart.js is loaded and canvas elements exist
+        const originalCtx = document.getElementById('originalElevationChart').getContext('2d');
+        const scaledCtx = document.getElementById('scaledElevationChart').getContext('2d');
+        this.originalElevationChart = new Chart(originalCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Elevation (m)',
+                    data: [],
+                    borderColor: '#6c757d',
+                    backgroundColor: 'rgba(108,117,125,0.1)',
+                    fill: true,
+                    tension: 0.2,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: { display: false },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Elevation (m)',
+                            font: {
+                                family: 'Inter, Segoe UI, Arial, sans-serif',
+                                size: 13,
+                                weight: '400',
+                                style: 'normal'
+                            },
+                            color: '#333',
+                            padding: {top: 8, bottom: 0}
+                        },
+                        ticks: {
+                            font: {
+                                family: 'Inter, Segoe UI, Arial, sans-serif',
+                                size: 12,
+                                weight: '400',
+                                style: 'normal'
+                            },
+                            color: '#333'
+                        }
+                    }
+                }
+            }
+        });
+        this.scaledElevationChart = new Chart(scaledCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Elevation (m)',
+                    data: [],
+                    borderColor: '#0d6efd',
+                    backgroundColor: 'rgba(13,110,253,0.1)',
+                    fill: true,
+                    tension: 0.2,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: { display: false },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Elevation (m)',
+                            font: {
+                                family: 'Inter, Segoe UI, Arial, sans-serif',
+                                size: 13,
+                                weight: '400',
+                                style: 'normal'
+                            },
+                            color: '#333',
+                            padding: {top: 8, bottom: 0}
+                        },
+                        ticks: {
+                            font: {
+                                family: 'Inter, Segoe UI, Arial, sans-serif',
+                                size: 12,
+                                weight: '400',
+                                style: 'normal'
+                            },
+                            color: '#333'
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // ...existing code...
+
     loadSavedParameters() {
         try {
             // Load saved parameters from localStorage
@@ -28,11 +169,9 @@ class GPXScalerApp {
                 // Set form values if elements exist
                 if (params.distanceScale && document.getElementById('distanceScale')) {
                     document.getElementById('distanceScale').value = params.distanceScale;
-                    document.getElementById('distanceScaleValue').textContent = parseFloat(params.distanceScale).toFixed(3);
                 }
                 if (params.ascentScale && document.getElementById('ascentScale')) {
                     document.getElementById('ascentScale').value = params.ascentScale;
-                    document.getElementById('ascentScaleValue').textContent = parseFloat(params.ascentScale).toFixed(3);
                 }
                 if (params.startLat && document.getElementById('startLat')) {
                     document.getElementById('startLat').value = params.startLat;
@@ -56,6 +195,8 @@ class GPXScalerApp {
                 if (params.weightKg && document.getElementById('weightKg')) {
                     document.getElementById('weightKg').value = params.weightKg;
                 }
+                // Always sync display and trigger preview after loading
+                this.updateScaleValues();
             }
         } catch (error) {
             console.log('Could not load saved parameters:', error);
@@ -82,378 +223,119 @@ class GPXScalerApp {
     }
 
     initializeEventListeners() {
+        // ...reverted parameter-saving event listeners...
+        // Live update for all relevant controls
+        const startLat = document.getElementById('startLat');
+        const startLon = document.getElementById('startLon');
+        const baseName = document.getElementById('baseName');
+        const outputFormat = document.getElementById('outputFormat');
+        const addTiming = document.getElementById('addTiming');
+        const powerWatts = document.getElementById('powerWatts');
+        const weightKg = document.getElementById('weightKg');
+
+        if (startLat) startLat.addEventListener('input', () => this.updatePreview());
+        if (startLon) startLon.addEventListener('input', () => this.updatePreview());
+        if (baseName) baseName.addEventListener('input', () => this.updatePreview());
+        if (outputFormat) outputFormat.addEventListener('change', () => this.updatePreview());
+        if (addTiming) addTiming.addEventListener('change', () => {
+            this.toggleTimingControls();
+            this.updatePreview();
+        });
+        if (powerWatts) powerWatts.addEventListener('input', () => this.updatePreview());
+        if (weightKg) weightKg.addEventListener('input', () => this.updatePreview());
         // File upload events
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
 
+        // Reduce drop zone height via inline style (for immediate effect)
+        if (dropZone) {
+            dropZone.style.height = '60px'; // or adjust as needed
+            dropZone.style.minHeight = '40px';
+            dropZone.style.maxHeight = '80px';
+            dropZone.style.padding = '0';
+            dropZone.style.margin = '0';
+            dropZone.style.overflow = 'hidden';
+        }
+
+        // Remove internal spacing from children of dropZone
+        if (dropZone) {
+            Array.from(dropZone.children).forEach(child => {
+                child.style.padding = '0';
+                child.style.margin = '0';
+                child.style.boxSizing = 'border-box';
+            });
+        }
+
         dropZone.addEventListener('click', () => fileInput.click());
-        dropZone.addEventListener('dragover', this.handleDragOver.bind(this));
-        dropZone.addEventListener('drop', this.handleDrop.bind(this));
-        dropZone.addEventListener('dragleave', this.handleDragLeave.bind(this));
-        fileInput.addEventListener('change', this.handleFileSelect.bind(this));
-
-        // Set minimum for scaling sliders
-        const distanceScaleElem = document.getElementById('distanceScale');
-        const ascentScaleElem = document.getElementById('ascentScale');
-        if (distanceScaleElem) distanceScaleElem.setAttribute('min', '0.005');
-        if (ascentScaleElem) ascentScaleElem.setAttribute('min', '0.005');
-
-        // Slider events
-        distanceScaleElem.addEventListener('input', () => {
-            this.updateScaleValues();
-            this.saveParameters();
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
         });
-        ascentScaleElem.addEventListener('input', () => {
-            this.updateScaleValues();
-            this.saveParameters();
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
         });
-        document.getElementById('startLat').addEventListener('input', () => {
-            this.updatePreview();
-            this.saveParameters();
-        });
-        document.getElementById('startLon').addEventListener('input', () => {
-            this.updatePreview();
-            this.saveParameters();
-        });
-
-        // Timing controls
-        document.getElementById('addTiming').addEventListener('change', (e) => {
-            this.toggleTimingControls();
-            this.updatePreview(); // Update preview when timing is toggled
-            this.saveParameters();
-        });
-
-        // Add listeners for timing inputs (when they exist)
-        const powerInput = document.getElementById('powerWatts');
-        const weightInput = document.getElementById('weightKg');
-        if (powerInput) {
-            powerInput.addEventListener('input', () => {
-                this.updateUploadedFilesList(); // Update file cards with new duration
-                this.updatePreview(); // Update preview
-                this.saveParameters();
-            });
-        }
-        if (weightInput) {
-            weightInput.addEventListener('input', () => {
-                this.updateUploadedFilesList(); // Update file cards with new duration
-                this.updatePreview(); // Update preview
-                this.saveParameters();
-            });
-        }
-
-        // Add event listeners for other form controls
-        const baseNameInput = document.getElementById('baseName');
-        const outputFormatSelect = document.getElementById('outputFormat');
-
-        if (baseNameInput) {
-            baseNameInput.addEventListener('input', () => {
-                this.saveParameters();
-            });
-        }
-
-        if (outputFormatSelect) {
-            outputFormatSelect.addEventListener('change', () => {
-                this.saveParameters();
-            });
-        }
-
-        // Process button
-        document.getElementById('processAllBtn').addEventListener('click', (e) => {
-            console.log('Process All Files button clicked!');
-            this.processAllFiles.bind(this)(e);
-        });
-    }
-
-    initializeCharts() {
-        // Helper to compute average gradient over a window
-        function computeAverageGradient(elevations, distances, idx, windowSize = 5) {
-            const n = elevations.length;
-            const start = Math.max(0, idx - windowSize);
-            const end = Math.min(n - 1, idx + windowSize);
-            let totalElev = 0;
-            let totalDist = 0;
-            for (let i = start + 1; i <= end; i++) {
-                const dElev = Number(elevations[i]) - Number(elevations[i - 1]);
-                const dDist = Number(distances[i]) - Number(distances[i - 1]);
-                totalElev += dElev;
-                totalDist += dDist;
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            if (files.length > 0) {
+                this.uploadFiles(files);
             }
-            if (totalDist === 0) return null;
-            // dDist is in km, convert to m for gradient %
-            return (totalElev / (totalDist * 1000)) * 100;
-        }
-
-        // Original elevation chart
-        const originalCtx = document.getElementById('originalElevationChart').getContext('2d');
-        this.originalElevationChart = new Chart(originalCtx, {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: 'Original Elevation',
-                    data: [],
-                    borderColor: '#6c757d',
-                    backgroundColor: 'rgba(108, 117, 125, 0.1)',
-                    tension: 0.2,
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const idx = context.dataIndex;
-                                const elevations = context.chart.data.datasets[0].data;
-                                const distances = context.chart.data.labels;
-                                let elev = Math.round(Number(elevations[idx]));
-                                let label = `Elevation: ${elev} m`;
-                                if (elevations.length > 1 && idx > 0) {
-                                    const avgGradient = computeAverageGradient(elevations, distances, idx, 5);
-                                    if (avgGradient !== null) {
-                                        label += `, Gradient: ${avgGradient.toFixed(1)}%`;
-                                    } else {
-                                        label += ', Gradient: -';
-                                    }
-                                } else {
-                                    label += ', Gradient: -';
-                                }
-                                return label;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        title: {
-                            display: true,
-                            text: 'Distance (km)'
-                        }
-                    },
-                    y: {
-                        title: {
-                            display: true,
-                            text: 'Elevation (m)'
-                        }
-                    }
-                },
-                interaction: {
-                    intersect: false,
-                    mode: 'index'
-                }
+        });
+        fileInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length > 0) {
+                this.uploadFiles(files);
             }
         });
 
-        // Scaled elevation chart
-        const scaledCtx = document.getElementById('scaledElevationChart').getContext('2d');
-        this.scaledElevationChart = new Chart(scaledCtx, {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: 'Scaled Elevation',
-                    data: [],
-                    borderColor: '#0d6efd',
-                    backgroundColor: 'rgba(13, 110, 253, 0.1)',
-                    tension: 0.2,
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const idx = context.dataIndex;
-                                const elevations = context.chart.data.datasets[0].data;
-                                const distances = context.chart.data.labels;
-                                let elev = Math.round(Number(elevations[idx]));
-                                let label = `Elevation: ${elev} m`;
-                                if (elevations.length > 1 && idx > 0) {
-                                    const avgGradient = computeAverageGradient(elevations, distances, idx, 5);
-                                    if (avgGradient !== null) {
-                                        label += `, Gradient: ${avgGradient.toFixed(1)}%`;
-                                    } else {
-                                        label += ', Gradient: -';
-                                    }
-                                } else {
-                                    label += ', Gradient: -';
-                                }
-                                return label;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        title: {
-                            display: true,
-                            text: 'Distance (km)'
-                        }
-                    },
-                    y: {
-                        title: {
-                            display: true,
-                            text: 'Elevation (m)'
-                        }
-                    }
-                },
-                interaction: {
-                    intersect: false,
-                    mode: 'index'
-                }
-            }
-        });
-    }
-
-    initializeMaps() {
-        // Initialize original route map
-        const originalMapContainer = document.getElementById('originalRouteMap');
-        originalMapContainer.innerHTML = '<div id="originalMapLeaflet" style="height: 100%; width: 100%;"></div>';
-
-        this.originalMap = L.map('originalMapLeaflet', {
-            zoomControl: true,
-            attributionControl: false
-        }).setView([45.0, 2.0], 6); // Default view of France
-
-        // Add OpenStreetMap tiles
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors',
-            maxZoom: 18,
-            minZoom: 1
-        }).addTo(this.originalMap);
-
-        // Initialize scaled route map
-        const scaledMapContainer = document.getElementById('scaledRouteMap');
-        scaledMapContainer.innerHTML = '<div id="scaledMapLeaflet" style="height: 100%; width: 100%;"></div>';
-
-        this.scaledMap = L.map('scaledMapLeaflet', {
-            zoomControl: true,
-            attributionControl: false
-        }).setView([45.0, 2.0], 6); // Default view of France
-
-        // Add OpenStreetMap tiles
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors',
-            maxZoom: 18,
-            minZoom: 1
-        }).addTo(this.scaledMap);
-
-        // Initialize layer groups for route lines
-        this.originalLayer = L.layerGroup().addTo(this.originalMap);
-        this.scaledLayer = L.layerGroup().addTo(this.scaledMap);
-    }
-
-    handleDragOver(e) {
-        e.preventDefault();
-        e.currentTarget.classList.add('dragover');
-    }
-
-    handleDragLeave(e) {
-        e.currentTarget.classList.remove('dragover');
-    }
-
-    handleDrop(e) {
-        e.preventDefault();
-        e.currentTarget.classList.remove('dragover');
-
-        const files = Array.from(e.dataTransfer.files).filter(file =>
-            file.name.toLowerCase().endsWith('.gpx')
-        );
-
-        if (files.length > 0) {
-            this.uploadFiles(files);
-        } else {
-            this.showError('Please drop only GPX files');
+        // Scale slider events
+        const distanceScale = document.getElementById('distanceScale');
+        const ascentScale = document.getElementById('ascentScale');
+        if (distanceScale) {
+            distanceScale.addEventListener('input', () => this.updateScaleValues());
         }
-    }
-
-    handleFileSelect(e) {
-        const files = Array.from(e.target.files);
-        this.uploadFiles(files);
-        e.target.value = ''; // Reset input
+        if (ascentScale) {
+            ascentScale.addEventListener('input', () => this.updateScaleValues());
+        }
     }
 
     async uploadFiles(files) {
-        try {
-            this.showUploadProgress(true);
-            this.initializeUploadProgressBars(files);
+        // Show upload progress area, hide drop zone
+        const dropZone = document.getElementById('dropZone');
+        const uploadProgressArea = document.getElementById('uploadProgressArea');
+        if (dropZone) dropZone.style.display = 'none';
+        if (uploadProgressArea) uploadProgressArea.style.display = 'block';
 
-            const uploadedFiles = [];
+        this.initializeUploadProgressBars(files);
 
-            // Upload files one by one to show individual progress
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                console.log(`Uploading file ${i + 1}/${files.length}: ${file.name}`);
-
-                try {
-                    const result = await this.uploadSingleFile(file, i);
-                    if (result.success && result.files.length > 0) {
-                        uploadedFiles.push(...result.files);
-                        this.updateUploadFileProgress(i, 100, 'success', 'Uploaded');
-                    } else {
-                        this.updateUploadFileProgress(i, 100, 'danger', 'Failed');
-                        console.error(`Failed to upload ${file.name}:`, result.error);
-                    }
-                } catch (error) {
-                    this.updateUploadFileProgress(i, 100, 'danger', 'Error');
-                    console.error(`Error uploading ${file.name}:`, error);
-                }
-            }
-
-            // Update the uploaded files list with all successfully uploaded files
-            uploadedFiles.forEach(file => {
-                this.uploadedFiles.set(file.id, file);
-            });
-
-            this.updateUploadedFilesList();
-            this.updateProcessButton();
-
-            if (uploadedFiles.length > 0) {
-                this.showSuccess(`${uploadedFiles.length} file(s) uploaded successfully`);
-
-                // Auto-select first file for preview
-                if (!this.selectedFileId) {
-                    this.selectFile(uploadedFiles[0].id);
-                }
-            }
-
-            // Hide upload progress after a delay
-            setTimeout(() => {
-                this.showUploadProgress(false);
-            }, 2000);
-
-        } catch (error) {
-            this.showError('Upload failed: ' + error.message);
-            this.showUploadProgress(false);
-        }
-    }
-
-    async uploadSingleFile(file, index) {
+        // Upload all files in a single FormData as 'files'[]
         const formData = new FormData();
-        formData.append('files', file);
-
-        return new Promise((resolve, reject) => {
+        files.forEach((file, index) => {
+            if (file instanceof File) {
+                formData.append('files', file);
+                console.log('[DEBUG] Appending file as files:', file.name, file.type, file.size);
+            } else {
+                console.error('[DEBUG] Not a File object:', file);
+            }
+        });
+        // Debug: log FormData keys and values
+        for (let pair of formData.entries()) {
+            console.log('[DEBUG] FormData:', pair[0], pair[1]);
+        }
+        const uploadPromise = new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-
+            xhr.open('POST', '/upload');
+            // Do NOT set any custom headers here, let the browser set Content-Type for FormData
             xhr.upload.onprogress = (event) => {
                 if (event.lengthComputable) {
                     const percentComplete = (event.loaded / event.total) * 100;
-                    this.updateUploadFileProgress(index, percentComplete, 'info', 'Uploading...');
+                    this.updateUploadFileProgress(0, percentComplete, 'info', 'Uploading...');
                 }
             };
-
             xhr.onload = () => {
+                console.log('[DEBUG] Upload response:', xhr.status, xhr.statusText, xhr.responseText);
                 if (xhr.status === 200) {
                     try {
                         const result = JSON.parse(xhr.responseText);
@@ -462,19 +344,58 @@ class GPXScalerApp {
                         reject(new Error('Invalid response format'));
                     }
                 } else {
-                    reject(new Error(`HTTP ${xhr.status}: ${xhr.statusText}`));
+                    reject(new Error(`HTTP ${xhr.status}: ${xhr.statusText} - ${xhr.responseText}`));
                 }
             };
-
             xhr.onerror = () => {
                 reject(new Error('Network error occurred'));
             };
-
-            xhr.open('POST', '/upload');
             xhr.send(formData);
         });
-    }
+        const uploadPromises = [uploadPromise];
 
+        try {
+            const results = await Promise.all(uploadPromises);
+            // Debug: log backend results
+            console.log('[DEBUG] Upload results:', results);
+            // The backend returns an object with 'files': [ ... ]
+            results.forEach((result) => {
+                console.log('[DEBUG] Processing result:', result);
+                if (result.success && Array.isArray(result.files)) {
+                    result.files.forEach(fileObj => {
+                        console.log('[DEBUG] File object:', fileObj);
+                        if (fileObj.id) {
+                            this.uploadedFiles.set(fileObj.id, {
+                                filename: fileObj.filename,
+                                distance: fileObj.distance,
+                                ascent: fileObj.ascent,
+                                timingData: null
+                            });
+                        }
+                    });
+                }
+            });
+            console.log('[DEBUG] uploadedFiles map after upload:', Array.from(this.uploadedFiles.entries()));
+            this.updateUploadedFilesList();
+            this.updateProcessButton();
+            // Automatically select the first file after upload if any
+            if (this.uploadedFiles.size > 0) {
+                const firstId = Array.from(this.uploadedFiles.keys())[0];
+                this.selectFile(firstId);
+            }
+        } catch (error) {
+            // If error contains response text, show it for debugging
+            let errorMsg = error.message;
+            if (error && error.responseText) {
+                errorMsg += '\nServer response: ' + error.responseText;
+            }
+            this.showError('Upload failed: ' + errorMsg);
+        } finally {
+            // Hide upload progress area, show drop zone
+            if (dropZone) dropZone.style.display = '';
+            if (uploadProgressArea) uploadProgressArea.style.display = 'none';
+        }
+    }
     calculateScaledValues(originalDistance, originalAscent) {
         const distanceScale = parseFloat(document.getElementById('distanceScale').value);
         const ascentScale = parseFloat(document.getElementById('ascentScale').value);
@@ -540,116 +461,156 @@ class GPXScalerApp {
         };
     }
 
-    updateUploadedFilesList() {
-        const container = document.getElementById('uploadedFiles');
-        container.innerHTML = '';
+    async updateUploadedFilesList() {
+        if (this._updatingFilesList) return;
+        this._updatingFilesList = true;
+        try {
+            const container = document.getElementById('uploadedFiles');
+            if (!container) {
+                alert('Error: The file list container with id="uploadedFiles" is missing from the HTML.');
+                this._updatingFilesList = false;
+                return;
+            }
+            container.style.display = '';
+            container.style.visibility = 'visible';
+            const prevScroll = container.scrollTop || 0;
+            container.style.minHeight = '90px';
+            container.style.maxHeight = '180px';
+            container.style.overflowY = 'scroll';
 
-        this.uploadedFiles.forEach((file, fileId) => {
-            const scaledValues = this.calculateScaledValues(file.distance, file.ascent);
-
-            // Try to get backend timing value if available
-            let scaledDurationHours = null;
-            let originalDurationHours = null;
-            if (file.timingData && file.timingData.scaled_duration_hours) {
-                scaledDurationHours = file.timingData.scaled_duration_hours;
-            } else if (scaledValues.duration) {
-                scaledDurationHours = scaledValues.duration;
+            // If no files, show placeholder and return
+            if (this.uploadedFiles.size === 0) {
+                container.innerHTML = '<div id="fileCardPlaceholder" style="height:60px;opacity:0.2;">No files uploaded</div>';
+                this._updatingFilesList = false;
+                return;
             }
 
-            // Calculate original duration if timing is enabled
-            let addTiming = document.getElementById('addTiming').checked;
-            if (addTiming) {
-                const power = parseFloat(document.getElementById('powerWatts')?.value) || 200;
-                const weight = parseFloat(document.getElementById('weightKg')?.value) || 75;
-                const g = 9.81;
-                const Cr = 0.005;
-                const CdA = 0.3;
-                const rho = 1.225;
-                const wind = 0;
-                const originalDistance = file.distance;
-                const originalAscent = file.ascent;
-                const flatDistanceOrig = originalDistance - (originalAscent / 1000);
-                const ascentDistanceOrig = originalAscent / 1000;
-                function estimateSpeed(power, weight, gradient) {
-                    let v = 8;
-                    for (let i = 0; i < 10; i++) {
-                        const rolling = Cr * weight * g * v;
-                        const air = 0.5 * CdA * rho * Math.pow(v + wind, 3);
-                        const gravity = weight * g * gradient * v;
-                        const f = rolling + air + gravity - power;
-                        const df = Cr * weight * g + 1.5 * CdA * rho * Math.pow(v + wind, 2) + weight * g * gradient;
-                        v = v - f / df;
-                        if (v < 1) v = 1;
+            // Otherwise, render file cards
+            container.innerHTML = '';
+            const distanceScale = parseFloat(document.getElementById('distanceScale').value);
+            const ascentScale = parseFloat(document.getElementById('ascentScale').value);
+            const addTiming = document.getElementById('addTiming').checked;
+            const powerWatts = addTiming ? document.getElementById('powerWatts').value : null;
+            const weightKg = addTiming ? document.getElementById('weightKg').value : null;
+
+            // For each file, fetch timing data from backend if timing is enabled
+            const fetchTimingPromises = Array.from(this.uploadedFiles.entries()).map(async ([fileId, file]) => {
+                if (addTiming) {
+                    let url = `/preview_scaled/${fileId}?distance_scale=${distanceScale}&ascent_scale=${ascentScale}`;
+                    url += `&start_lat=0&start_lon=0`;
+                    url += `&power_watts=${powerWatts}&weight_kg=${weightKg}`;
+                    try {
+                        const response = await fetch(url);
+                        const result = await response.json();
+                        if (result.success && result.timing) {
+                            file.timingData = result.timing;
+                        }
+                    } catch (e) {
+                        // Ignore errors, fallback to local calculation
                     }
-                    return v;
+                } else {
+                    file.timingData = null;
                 }
-                const ascentGradientOrig = originalAscent / (ascentDistanceOrig * 1000);
-                const ascentSpeedOrig = estimateSpeed(power, weight, ascentGradientOrig);
-                const ascentTimeOrig = ascentDistanceOrig * 1000 / ascentSpeedOrig;
-                const flatSpeedOrig = estimateSpeed(power, weight, 0);
-                const flatTimeOrig = flatDistanceOrig * 1000 / flatSpeedOrig;
-                originalDurationHours = (ascentTimeOrig + flatTimeOrig) / 3600;
-            }
-
-            let originalDurationBadge = '';
-            let scaledDurationBadge = '';
-            if (originalDurationHours) {
-                const hours = Math.floor(originalDurationHours);
-                const minutes = Math.round((originalDurationHours - hours) * 60);
-                originalDurationBadge = `<span class="badge bg-secondary me-1" title="Original Duration">${hours}h ${minutes}m</span>`;
-            }
-            if (scaledDurationHours) {
-                const hours = Math.floor(scaledDurationHours);
-                const minutes = Math.round((scaledDurationHours - hours) * 60);
-                scaledDurationBadge = `<span class="badge bg-info me-1" title="Scaled Duration">${hours}h ${minutes}m</span>`;
-            }
-
-            const fileElement = document.createElement('div');
-            fileElement.className = `file-item ${fileId === this.selectedFileId ? 'selected' : ''}`;
-
-            fileElement.innerHTML = `
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="fw-bold">${file.filename}</span>
-                    <span class="d-flex align-items-center">
-                        <i class="fas fa-eye me-2"></i>
-                        <button class="btn btn-sm btn-outline-danger remove-file-btn" title="Remove file" style="padding:0.25rem 0.5rem;display:inline-flex;align-items:center;">
-                            <i class="fas fa-trash-alt"></i>
-                        </button>
-                    </span>
-                </div>
-                <div class="file-stats">
-                    <div class="mb-1">
-                        <small class="text-muted me-2">Original:</small>
-                        <span class="badge bg-secondary me-1">${file.distance} km</span>
-                        <span class="badge bg-secondary me-1">${file.ascent} m</span>
-                        ${originalDurationBadge}
-                    </div>
-                    <div>
-                        <small class="text-muted me-2">Scaled:</small>
-                        <span class="badge bg-primary me-1">${scaledValues.distance.toFixed(1)} km</span>
-                        <span class="badge bg-success me-1">${scaledValues.ascent.toFixed(0)} m</span>
-                        ${scaledDurationBadge}
-                    </div>
-                </div>
-            `;
-
-            // Remove file button
-            const removeBtn = fileElement.querySelector('.remove-file-btn');
-            removeBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.uploadedFiles.delete(fileId);
-                if (this.selectedFileId === fileId) {
-                    // Select another file if available
-                    const nextId = Array.from(this.uploadedFiles.keys())[0];
-                    this.selectedFileId = nextId || null;
-                }
-                this.updateUploadedFilesList();
-                this.updateProcessButton();
             });
+            await Promise.all(fetchTimingPromises);
 
-            fileElement.addEventListener('click', () => this.selectFile(fileId));
-            container.appendChild(fileElement);
-        });
+            for (const [fileId, file] of this.uploadedFiles.entries()) {
+                const scaledDistance = file.distance * distanceScale;
+                const scaledAscent = file.ascent * ascentScale;
+                let scaledDurationHours = null;
+                let originalDurationHours = null;
+                if (file.timingData && file.timingData.scaled_duration_hours) {
+                    scaledDurationHours = file.timingData.scaled_duration_hours;
+                }
+                if (addTiming) {
+                    const power = parseFloat(document.getElementById('powerWatts')?.value) || 200;
+                    const weight = parseFloat(document.getElementById('weightKg')?.value) || 75;
+                    const g = 9.81;
+                    const Cr = 0.005;
+                    const CdA = 0.3;
+                    const rho = 1.225;
+                    const wind = 0;
+                    const originalDistance = file.distance;
+                    const originalAscent = file.ascent;
+                    const flatDistanceOrig = originalDistance - (originalAscent / 1000);
+                    const ascentDistanceOrig = originalAscent / 1000;
+                    function estimateSpeed(power, weight, gradient) {
+                        let v = 8;
+                        for (let i = 0; i < 10; i++) {
+                            const rolling = Cr * weight * g * v;
+                            const air = 0.5 * CdA * rho * Math.pow(v + wind, 3);
+                            const gravity = weight * g * gradient * v;
+                            const f = rolling + air + gravity - power;
+                            const df = Cr * weight * g + 1.5 * CdA * rho * Math.pow(v + wind, 2) + weight * g * gradient;
+                            v = v - f / df;
+                            if (v < 1) v = 1;
+                        }
+                        return v;
+                    }
+                    const ascentGradientOrig = originalAscent / (ascentDistanceOrig * 1000);
+                    const ascentSpeedOrig = estimateSpeed(power, weight, ascentGradientOrig);
+                    const ascentTimeOrig = ascentDistanceOrig * 1000 / ascentSpeedOrig;
+                    const flatSpeedOrig = estimateSpeed(power, weight, 0);
+                    const flatTimeOrig = flatDistanceOrig * 1000 / flatSpeedOrig;
+                    originalDurationHours = (ascentTimeOrig + flatTimeOrig) / 3600;
+                }
+                let originalDurationBadge = '';
+                let scaledDurationBadge = '';
+                if (originalDurationHours) {
+                    const hours = Math.floor(originalDurationHours);
+                    const minutes = Math.round((originalDurationHours - hours) * 60);
+                    originalDurationBadge = `<span class="badge bg-secondary me-1" title="Original Duration">${hours}h ${minutes}m</span>`;
+                }
+                if (scaledDurationHours) {
+                    const hours = Math.floor(scaledDurationHours);
+                    const minutes = Math.round((scaledDurationHours - hours) * 60);
+                    scaledDurationBadge = `<span class="badge bg-info me-1" title="Scaled Duration">${hours}h ${minutes}m</span>`;
+                }
+                const fileElement = document.createElement('div');
+                fileElement.className = `file-item ${fileId === this.selectedFileId ? 'selected' : ''}`;
+                fileElement.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="fw-bold">${file.filename}</span>
+                        <span class="d-flex align-items-center">
+                            <i class="fas fa-eye me-2"></i>
+                            <button class="btn btn-sm btn-outline-danger remove-file-btn" title="Remove file" style="padding:0.25rem 0.5rem;display:inline-flex;align-items:center;">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </span>
+                    </div>
+                    <div class="file-stats">
+                        <div class="mb-1">
+                            <small class="text-muted me-2">Original:</small>
+                            <span class="badge bg-secondary me-1">${file.distance} km</span>
+                            <span class="badge bg-secondary me-1">${file.ascent} m</span>
+                            ${originalDurationBadge}
+                        </div>
+                        <div>
+                            <small class="text-muted me-2">Scaled:</small>
+                            <span class="badge bg-primary me-1">${scaledDistance.toFixed(1)} km</span>
+                            <span class="badge bg-success me-1">${scaledAscent.toFixed(0)} m</span>
+                            ${scaledDurationBadge}
+                        </div>
+                    </div>
+                `;
+                const removeBtn = fileElement.querySelector('.remove-file-btn');
+                removeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.uploadedFiles.delete(fileId);
+                    if (this.selectedFileId === fileId) {
+                        const nextId = Array.from(this.uploadedFiles.keys())[0];
+                        this.selectedFileId = nextId || null;
+                    }
+                    this.updateUploadedFilesList();
+                    this.updateProcessButton();
+                });
+                fileElement.addEventListener('click', () => this.selectFile(fileId));
+                container.appendChild(fileElement);
+            }
+            container.scrollTop = prevScroll;
+        } finally {
+            this._updatingFilesList = false;
+        }
     }
 
     async selectFile(fileId) {
@@ -859,7 +820,7 @@ class GPXScalerApp {
     }
 
     updateRouteOnMap(map, layer, points, color) {
-        if (!points || points.length < 2) {
+        if (!map || !layer || !points || points.length < 2) {
             return;
         }
 
@@ -908,25 +869,29 @@ class GPXScalerApp {
 
     updateElevationChart(originalData, scaledData = null) {
         // Update original elevation chart
-        if (!originalData || !originalData.distances || !originalData.elevations) {
-            this.originalElevationChart.data.labels = [];
-            this.originalElevationChart.data.datasets[0].data = [];
-            this.originalElevationChart.update();
-        } else {
-            this.originalElevationChart.data.labels = originalData.distances.map(d => d.toFixed(1));
-            this.originalElevationChart.data.datasets[0].data = originalData.elevations;
-            this.originalElevationChart.update();
+        if (this.originalElevationChart) {
+            if (!originalData || !originalData.distances || !originalData.elevations) {
+                this.originalElevationChart.data.labels = [];
+                this.originalElevationChart.data.datasets[0].data = [];
+                this.originalElevationChart.update();
+            } else {
+                this.originalElevationChart.data.labels = originalData.distances.map(d => d.toFixed(1));
+                this.originalElevationChart.data.datasets[0].data = originalData.elevations;
+                this.originalElevationChart.update();
+            }
         }
 
         // Update scaled elevation chart
-        if (!scaledData || !scaledData.distances || !scaledData.elevations) {
-            this.scaledElevationChart.data.labels = [];
-            this.scaledElevationChart.data.datasets[0].data = [];
-            this.scaledElevationChart.update();
-        } else {
-            this.scaledElevationChart.data.labels = scaledData.distances.map(d => d.toFixed(1));
-            this.scaledElevationChart.data.datasets[0].data = scaledData.elevations;
-            this.scaledElevationChart.update();
+        if (this.scaledElevationChart) {
+            if (!scaledData || !scaledData.distances || !scaledData.elevations) {
+                this.scaledElevationChart.data.labels = [];
+                this.scaledElevationChart.data.datasets[0].data = [];
+                this.scaledElevationChart.update();
+            } else {
+                this.scaledElevationChart.data.labels = scaledData.distances.map(d => d.toFixed(1));
+                this.scaledElevationChart.data.datasets[0].data = scaledData.elevations;
+                this.scaledElevationChart.update();
+            }
         }
     }
 
@@ -1036,6 +1001,7 @@ class GPXScalerApp {
     }
 
     async processAllFiles() {
+
         console.log('processAllFiles called, uploaded files count:', this.uploadedFiles.size);
 
         if (this.uploadedFiles.size === 0) {
@@ -1055,6 +1021,9 @@ class GPXScalerApp {
         const powerWatts = addTiming ? parseInt(document.getElementById('powerWatts').value) : null;
         const weightKg = addTiming ? parseInt(document.getElementById('weightKg').value) : null;
 
+        // TRACE: Log the scale values being sent
+        console.log('[TRACE] processAllFiles: distanceScale =', distanceScale, ', ascentScale =', ascentScale);
+
         const requestData = {
             file_ids: fileIds,
             distance_scale: distanceScale,
@@ -1068,7 +1037,7 @@ class GPXScalerApp {
             weight_kg: weightKg
         };
 
-        console.log('Request data:', requestData);
+        console.log('[TRACE] processAllFiles: requestData =', requestData);
 
         try {
             this.showProcessingProgress(true);

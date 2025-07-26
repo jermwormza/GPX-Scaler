@@ -1,12 +1,13 @@
 {
-  "scale": 0.25,
-  "start_lat": 52.5,
-  "start_lon": 4.0,
-  "output_format": "tcx",
-  "base_name": "Stage",
+  "scale": 0.12,
+  "start_lat": -32.0,
+  "start_lon": 23.5,
+  "output_format": "fit",
+  "base_name": "TDLV-",
   "add_timing": true,
   "power": 160.0,
   "weight": 75.0,
   "min_distance": 30,
-  "max_ascent": 450.0
+  "max_ascent": 450.0,
+  "ascent_scale": null
 }

@@ -290,8 +290,7 @@ def get_scaled_preview(file_id):
                 'original_duration_hours': original_duration / 3600,
                 'scaled_duration_hours': scaled_duration / 3600
             }
-        except Exception as e:
-            print(f"Error calculating timing: {e}")
+        except Exception:
             timing_data = {}
 
     return jsonify({
@@ -305,24 +304,19 @@ def get_scaled_preview(file_id):
 @app.route('/progress/<session_id>')
 def progress_stream(session_id):
     """Server-sent events endpoint for processing progress."""
-    print(f"Progress stream requested for session: {session_id}")
-
     def generate():
         while True:
             with progress_lock:
                 if session_id in processing_progress:
                     data = processing_progress[session_id]
-                    print(f"Sending progress data: {data}")
                     yield f"data: {json.dumps(data)}\n\n"
 
                     # Clean up completed sessions
                     if data.get('status') == 'completed':
-                        print(f"Session {session_id} completed, cleaning up")
                         del processing_progress[session_id]
                         break
                 else:
                     # Session doesn't exist, end stream
-                    print(f"Session {session_id} not found, ending stream")
                     break
             time.sleep(0.1)
 
@@ -333,11 +327,9 @@ def progress_stream(session_id):
 def process_files():
     """Process uploaded files with scaling parameters."""
     data = request.get_json()
-    print(f"Processing request received with data: {data}")
 
     # Generate a unique session ID for this processing job
     session_id = str(uuid.uuid4())
-    print(f"Generated session ID: {session_id}")
 
     # Extract parameters
     file_ids = data.get('file_ids', [])
@@ -351,8 +343,6 @@ def process_files():
     power_watts = int(data.get('power_watts', 200)) if add_timing else None
     weight_kg = int(data.get('weight_kg', 75)) if add_timing else None
 
-    print(f"Processing {len(file_ids)} files with session {session_id}")
-
     # Initialize progress tracking
     with progress_lock:
         processing_progress[session_id] = {
@@ -361,7 +351,6 @@ def process_files():
             'current_file': 0,
             'files': {}
         }
-        print(f"Initialized progress tracking: {processing_progress[session_id]}")
 
     def process_files_async():
         processed_file_data = []
@@ -410,7 +399,8 @@ def process_files():
                         add_timing=add_timing,
                         power_watts=power_watts,
                         weight_kg=weight_kg,
-                        original_filename=file_data['filename']
+                        original_filename=file_data['filename'],
+                        ascent_scale=ascent_scale
                     )
 
                     if success:
