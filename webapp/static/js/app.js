@@ -233,16 +233,35 @@ class GPXScalerApp {
         const powerWatts = document.getElementById('powerWatts');
         const weightKg = document.getElementById('weightKg');
 
-        if (startLat) startLat.addEventListener('input', () => this.updatePreview());
-        if (startLon) startLon.addEventListener('input', () => this.updatePreview());
-        if (baseName) baseName.addEventListener('input', () => this.updatePreview());
-        if (outputFormat) outputFormat.addEventListener('change', () => this.updatePreview());
+        if (startLat) startLat.addEventListener('input', () => {
+            this.saveParameters();
+            this.updatePreview();
+        });
+        if (startLon) startLon.addEventListener('input', () => {
+            this.saveParameters();
+            this.updatePreview();
+        });
+        if (baseName) baseName.addEventListener('input', () => {
+            this.saveParameters();
+            this.updatePreview();
+        });
+        if (outputFormat) outputFormat.addEventListener('change', () => {
+            this.saveParameters();
+            this.updatePreview();
+        });
         if (addTiming) addTiming.addEventListener('change', () => {
+            this.saveParameters();
             this.toggleTimingControls();
             this.updatePreview();
         });
-        if (powerWatts) powerWatts.addEventListener('input', () => this.updatePreview());
-        if (weightKg) weightKg.addEventListener('input', () => this.updatePreview());
+        if (powerWatts) powerWatts.addEventListener('input', () => {
+            this.saveParameters();
+            this.updatePreview();
+        });
+        if (weightKg) weightKg.addEventListener('input', () => {
+            this.saveParameters();
+            this.updatePreview();
+        });
         // File upload events
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
@@ -294,10 +313,16 @@ class GPXScalerApp {
         const distanceScale = document.getElementById('distanceScale');
         const ascentScale = document.getElementById('ascentScale');
         if (distanceScale) {
-            distanceScale.addEventListener('input', () => this.updateScaleValues());
+            distanceScale.addEventListener('input', () => {
+                this.saveParameters();
+                this.updateScaleValues();
+            });
         }
         if (ascentScale) {
-            ascentScale.addEventListener('input', () => this.updateScaleValues());
+            ascentScale.addEventListener('input', () => {
+                this.saveParameters();
+                this.updateScaleValues();
+            });
         }
 
         // Process All Files button event
